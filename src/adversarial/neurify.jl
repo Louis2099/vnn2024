@@ -65,7 +65,6 @@ function solve(solver::Neurify, problem::Problem)
     result.status == :unknown || return result
     reach_list = SymbolicIntervalGradient[reach]
     for i in 2:solver.max_iter
-        # println("iter ",i)
         length(reach_list) > 0 || return BasicResult(:holds)
         reach = pick_out!(reach_list, solver.tree_search)
         intervals = constraint_refinement(solver, problem.network, reach, model)

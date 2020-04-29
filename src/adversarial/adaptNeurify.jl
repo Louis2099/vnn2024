@@ -1,7 +1,7 @@
 """
-    Neurify(max_iter::Int64, tree_search::Symbol)
+    AdaptNeurify(max_iter::Int64, tree_search::Symbol)
 
-Neurify combines symbolic reachability analysis with constraint refinement to minimize over-approximation of the reachable set.
+AdaptNeurify combines symbolic reachability analysis with constraint refinement to minimize over-approximation of the reachable set.
 
 # Problem requirement
 1. Network: any depth, ReLU activation
@@ -25,7 +25,7 @@ Sound but not complete.
 [https://github.com/tcwangshiqi-columbia/Neurify](https://github.com/tcwangshiqi-columbia/Neurify)
 """
 
-@with_kw struct Neurify
+@with_kw struct AdaptNeurify
     max_iter::Int64     = 100
     tree_search::Symbol = :DFS # only :DFS/:BFS allowed? If so, we should assert this.
     model = Nothing()
@@ -48,7 +48,7 @@ struct SymbolicIntervalGradient
     UΛ::Vector{Vector{Float64}}
 end
 
-function solve(solver::Neurify, problem::Problem)
+function solve(solver::AdaptNeurify, problem::Problem)
     problem = Problem(problem.network, convert(HPolytope, problem.input), convert(HPolytope, problem.output))
 
     reach_lc = problem.input.constraints
@@ -65,10 +65,40 @@ function solve(solver::Neurify, problem::Problem)
     result.status == :unknown || return result
     reach_list = SymbolicIntervalGradient[reach]
     for i in 2:solver.max_iter
-        # println("iter ",i)
         length(reach_list) > 0 || return BasicResult(:holds)
         reach = pick_out!(reach_list, solver.tree_search)
         intervals = constraint_refinement(solver, problem.network, reach)
+        for interval in intervals
+            reach = forward_network(solver, problem.network, interval, model)
+            result = check_inclusion(reach.sym, problem.output, problem.network, model)
+            result.status == :violated && return result
+            result.status == :holds || (push!(reach_list, reach))
+        end
+    end
+    return BasicResult(:unknown)
+end
+
+
+function solve(solver::AdaptNeurify, problem::Problem, reach_hist)
+    problem = Problem(problem.network, convert(HPolytope, problem.input), convert(HPolytope, problem.output))
+
+    reach_lc = problem.input.constraints
+    output_lc = problem.output.constraints
+
+    n = size(reach_lc, 1)
+    m = size(reach_lc[1].a, 1)
+    model =Model(with_optimizer(GLPK.Optimizer))
+    @variable(model, x[1:m], base_name="x")
+    @constraint(model, [i in 1:n], reach_lc[i].a' * x <= reach_lc[i].b)
+    
+    reach = forward_network(solver, problem.network, problem.input, model)
+    result = check_inclusion(reach.sym, problem.output, problem.network, model) # This called the check_inclusion function in ReluVal, because the constraints are Hyperrectangle
+    result.status == :unknown || return result
+    reach_list = SymbolicIntervalGradient[reach]
+    for i in 2:solver.max_iter
+        length(reach_list) > 0 || return BasicResult(:holds)
+        reach = pick_out!(reach_list, solver.tree_search)
+        intervals = constraint_refinement(solver, problem.network, reach, model)
         for interval in intervals
             reach = forward_network(solver, problem.network, interval, model)
             result = check_inclusion(reach.sym, problem.output, problem.network, model)
@@ -138,12 +168,12 @@ function check_inclusion(reach::SymbolicInterval{HPolytope{N}}, output::Abstract
     return BasicResult(:holds)
 end
 
-function constraint_refinement(solver::Neurify, nnet::Network, reach::SymbolicIntervalGradient)
+function constraint_refinement(solver::Neurify, nnet::Network, reach::SymbolicIntervalGradient, model)
     i, j, gradient = get_nodewise_gradient(nnet, reach.LΛ, reach.UΛ)
     # We can generate three more constraints
     # Symbolic representation of node i j is Low[i][j,:] and Up[i][j,:]
     nnet_new = Network(nnet.layers[1:i])
-    reach_new = forward_network(solver, nnet_new, reach.sym.interval)
+    reach_new = forward_network(solver, nnet_new, reach.sym.interval, model)
     C, d = tosimplehrep(reach.sym.interval)
     l_sym = reach_new.sym.Low[[j], 1:end-1]
     l_off = reach_new.sym.Low[[j], end]
@@ -189,12 +219,12 @@ function forward_network(solver, nnet::Network, input::AbstractPolytope, model)
     return reach
 end
 
-function forward_layer(solver::Neurify, layer::Layer, input, model)
+function forward_layer(solver::AdaptNeurify, layer::Layer, input, model)
     return forward_act(forward_linear(solver, input, layer), layer, model)
 end
 
 # Symbolic forward_linear for the first layer
-function forward_linear(solver::Neurify, input::AbstractPolytope, layer::Layer)
+function forward_linear(solver::AdaptNeurify, input::AbstractPolytope, layer::Layer)
     (W, b) = (layer.weights, layer.bias)
     sym = SymbolicInterval(hcat(W, b), hcat(W, b), input)
     LΛ = Vector{Vector{Int64}}(undef, 0)
@@ -203,7 +233,7 @@ function forward_linear(solver::Neurify, input::AbstractPolytope, layer::Layer)
 end
 
 # Symbolic forward_linear
-function forward_linear(solver::Neurify, input::SymbolicIntervalGradient, layer::Layer)
+function forward_linear(solver::AdaptNeurify, input::SymbolicIntervalGradient, layer::Layer)
     (W, b) = (layer.weights, layer.bias)
     output_Up = max.(W, 0) * input.sym.Up + min.(W, 0) * input.sym.Low
     output_Low = max.(W, 0) * input.sym.Low + min.(W, 0) * input.sym.Up
