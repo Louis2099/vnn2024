@@ -119,8 +119,9 @@ function check_inclusion(reach::SymbolicInterval{HPolytope{N}}, output::Abstract
             end
         else
             if ∈(value(x), reach.interval)
+                println(termination_status(model))
                 print("Not OPTIMAL, but x in the input set")
-                exit()
+                # exit()
             end
             return BasicResult(:unknown)
         end
