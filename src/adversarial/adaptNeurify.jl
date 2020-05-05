@@ -95,9 +95,11 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
     model =Model(with_optimizer(GLPK.Optimizer))
     @variable(model, x[1:m], base_name="x")
     @constraint(model, [i in 1:n], reach_lc[i].a' * x <= reach_lc[i].b)
-    
+    println("start forwarding")
     init_reach, init_last_reach = forward_network(solver, problem.network, problem.input, model, true)
+    println("start checking")
     result = check_inclusion(init_reach.sym, problem.output, problem.network, model) # This called the check_inclusion function in ReluVal, because the constraints are Hyperrectangle
+    println("finish checking")
     result.status == :unknown || return result, Tuple[], Dict(), []
     
     visited = falses(solver.max_iter*4) #if we visited n nodes, then there are at most 4*n nodes in the tree. because every node has 3 children.
@@ -107,16 +109,11 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
     if follow_previous_tree
         for i in 1:solver.max_iter
             if i <= length(last_order)
-                println("direct picked")
                 idx = last_order[i]
                 last_reach = last_reach_list[idx]
                 visited[idx] = true
             else
-                # println("picked out")
                 last_reach, idx = pick_out!(last_reach_list, solver.tree_search, visited, last_order)
-                # println("idx")
-                # println(idx)
-                # println(length(last_reach_list))
             end
             idx == -1 && return BasicResult(:holds), last_reach_list, last_children, last_order
             # println("last layer size")
@@ -140,13 +137,16 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
                 end
                 violated_results == nothing || return violated_results, last_reach_list, last_children, last_order
             end
-            # result.status == :holds || (push!(last_reach_list, reach)) # why would I do this??????
+            # result.status == :holds || (push!(last_reach_list, reach)) # This is a bug, why would I do this??????
         end
         return BasicResult(:unknown), last_reach_list, last_children, last_order
     else
         reach_list = [(init_reach,:unknown)]
         last_reach_list = [init_last_reach]
         for i in 1:solver.max_iter
+            if i%10 == 0
+                println("iter ",i)
+            end
             (reach, status), idx = pick_out!(reach_list, solver.tree_search, visited, order)
             idx == -1 && return BasicResult(:holds), reach_list, children, order
             status == :holds && continue
@@ -193,8 +193,6 @@ function forward_network(solver, nnet::Network, input::AbstractPolytope, model::
     for (i, layer) in enumerate(nnet.layers)
         if i == length(nnet.layers)
             last_reach = deepcopy(reach)
-            # println("last_reach")
-            # println(size(last_reach.sym.Low))
         end
         reach = forward_layer(solver, layer, reach, model)
     end
@@ -218,11 +216,6 @@ end
 # Symbolic forward_linear
 function forward_linear(solver::AdaptNeurify, input::SymbolicIntervalGradient, layer::Layer)
     (W, b) = (layer.weights, layer.bias)
-    # println("===")
-    # println(size(W))
-    # println(size(b))
-    # println(size(input.sym.Up))
-    # println(size(input.sym.Low))
     output_Up = max.(W, 0) * input.sym.Up + min.(W, 0) * input.sym.Low
     output_Low = max.(W, 0) * input.sym.Low + min.(W, 0) * input.sym.Up
     output_Up[:, end] += b

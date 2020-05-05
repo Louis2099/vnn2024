@@ -26,7 +26,7 @@ Sound but not complete.
 """
 
 @with_kw struct Neurify
-    max_iter::Int64     = 10
+    max_iter::Int64     = 100
     tree_search::Symbol = :DFS # only :DFS/:BFS allowed? If so, we should assert this.
     model = Nothing()
 end
@@ -59,23 +59,39 @@ function solve(solver::Neurify, problem::Problem)
     model =Model(with_optimizer(GLPK.Optimizer))
     @variable(model, x[1:m], base_name="x")
     @constraint(model, [i in 1:n], reach_lc[i].a' * x <= reach_lc[i].b)
-    
     reach = forward_network(solver, problem.network, problem.input, model)
     result = check_inclusion(reach.sym, problem.output, problem.network, model) # This called the check_inclusion function in ReluVal, because the constraints are Hyperrectangle
     result.status == :unknown || return result
     reach_list = SymbolicIntervalGradient[reach]
+
+    forward_tot = 0
+    refine_tot = 0
+    check_tot = 0
     for i in 2:solver.max_iter
         print(i,' ')
         length(reach_list) > 0 || return BasicResult(:holds)
         reach = pick_out!(reach_list, solver.tree_search)
+        timed_refine = @timed constraint_refinement(solver, problem.network, reach, model)
+        intervals = timed_refine[1]
+        refine_tot += timed_refine[2]
+        # intervals = constraint_refinement(solver, problem.network, reach, model)
         intervals = constraint_refinement(solver, problem.network, reach, model)
         for interval in intervals
-            reach = forward_network(solver, problem.network, interval, model)
-            result = check_inclusion(reach.sym, problem.output, problem.network, model)
+            timed_reach = @timed forward_network(solver, problem.network, interval, model)
+            reach = timed_reach[1]
+            timed_result = @timed check_inclusion(reach.sym, problem.output, problem.network, model)
+            result = timed_result[1]
+            forward_tot += timed_reach[2]
+            check_tot += timed_result[2]
+            # reach = forward_network(solver, problem.network, interval, model)
+            # result = check_inclusion(reach.sym, problem.output, problem.network, model)
             result.status == :violated && return result
             result.status == :holds || (push!(reach_list, reach))
         end
     end
+    println("forward_tot ", forward_tot)
+    println("check_tot  " , check_tot)
+    println("refine_tot " , refine_tot)
     return BasicResult(:unknown)
 end
 
@@ -85,13 +101,13 @@ function check_inclusion(reach::SymbolicInterval{HPolytope{N}}, output::Abstract
     # suppose the output is [1, 0, -1] * x < 2, Then we are maximizing reach.Up[1] * 1 + reach.Low[3] * (-1) 
     
     x = model[:x]
-    # reach_lc = reach.interval.constraints
-    # output_lc = output.constraints
-    # n = size(reach_lc, 1)
-    # m = size(reach_lc[1].a, 1)
-    # model =Model(with_optimizer(GLPK.Optimizer))
-    # @variable(model, x[1:m])
-    # @constraint(model, [i in 1:n], reach_lc[i].a' * x <= reach_lc[i].b)
+    reach_lc = reach.interval.constraints
+    output_lc = output.constraints
+    n = size(reach_lc, 1)
+    m = size(reach_lc[1].a, 1)
+    model =Model(with_optimizer(GLPK.Optimizer))
+    @variable(model, x[1:m])
+    @constraint(model, [i in 1:n], reach_lc[i].a' * x <= reach_lc[i].b)
 
     for i in 1:size(output.constraints, 1)
         obj = zeros(size(reach.Low, 2))
@@ -113,9 +129,6 @@ function check_inclusion(reach::SymbolicInterval{HPolytope{N}}, output::Abstract
                 if ∈(value(x), reach.interval)
                     return CounterExampleResult(:violated, value(x))
                 else
-                    println("OPTIMAL, but x not in the input set")
-                    println("This is usually cased by precision problems, don't worry. But if you think this might be the source of problem, check it out in \"neurify.jl\".")
-                    # println(termination_status(model))
                     # println("x")
                     # println(value(x))
                     # println("obj")
@@ -125,9 +138,17 @@ function check_inclusion(reach::SymbolicInterval{HPolytope{N}}, output::Abstract
                     # for k in 1:size(reach_lc, 1)
                     #     println(reach_lc[k].a' * value(x),' ', reach_lc[k].b)
                     # end
-                    # for k in 1:size(reach_lc, 1)
-                    #     println(k, ' ', reach_lc[k].a' * value(x) <= reach_lc[k].b)
-                    # end
+                    reach_lc = reach.interval.constraints
+                    for k in 1:size(reach_lc, 1)
+                        if reach_lc[k].a' * value(x) > reach_lc[k].b + 1e-6
+                            println(termination_status(model))
+                            println("OPTIMAL, but x not in the input set")
+                            println("This is usually cased by precision problems, don't worry. But if you think this might be the source of problem, check it out in \"neurify.jl\".")
+                            println("out of bound constraint:", k, ' ', reach_lc[k].a' * value(x), ' ', reach_lc[k].b)
+                            println("out of bound constraint:", k, ' ', reach_lc[k].a',' ',value(x))
+                            exit()
+                        end
+                    end
                     # exit()
                 end
             end
@@ -235,6 +256,13 @@ function forward_act(input::SymbolicIntervalGradient, layer::Layer{ReLU}, model:
     n_node, n_input = size(input.sym.Up)
     output_Low, output_Up = input.sym.Low[:, :], input.sym.Up[:, :]
     mask_lower, mask_upper = zeros(Float64, n_node), ones(Float64, n_node)
+
+    n = size(input.sym.interval.constraints, 1)
+    m = size(input.sym.interval.constraints[1].a, 1)
+    model =Model(with_optimizer(GLPK.Optimizer))
+    @variable(model, x[1:m])
+    @constraint(model, [i in 1:n], input.sym.interval.constraints[i].a' * x <= input.sym.interval.constraints[i].b)
+
     for i in 1:n_node
         if upper_bound(input.sym.Up[i, :], input.sym.interval, model) <= 0.0
             # Update to zero
@@ -275,11 +303,6 @@ end
 
 
 function upper_bound(map::Vector{Float64}, input::HPolytope, model::JuMP.Model)
-    # n = size(input.constraints, 1)
-    # m = size(input.constraints[1].a, 1)
-    # model =Model(with_optimizer(GLPK.Optimizer))
-    # @variable(model, x[1:m])
-    # @constraint(model, [i in 1:n], input.constraints[i].a' * x <= input.constraints[i].b)
     x = model[:x]
     @objective(model, Max, map' * [x; [1]])
     optimize!(model)
