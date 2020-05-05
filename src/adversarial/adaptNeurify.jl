@@ -71,11 +71,11 @@ function pick_out!(reach_list, tree_search, visited, order)
         end
     else
         i = length(reach_list)
-        while i > 0 && visited[i]
+        while i >= 1 && visited[i]
             i-=1
         end
     end
-    if i <= 0 || i > n
+    if i < 1 || i > n
         return nothing, -1
     end
     reach = reach_list[i]
@@ -107,17 +107,28 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
     if follow_previous_tree
         for i in 1:solver.max_iter
             if i <= length(last_order)
+                println("direct picked")
                 idx = last_order[i]
                 last_reach = last_reach_list[idx]
                 visited[idx] = true
             else
-                last_reach, idx = pick_out!(last_reach_list, solver.tree_search, visited, last_order) # this is wrong, we should follow the order visited last time 
+                # println("picked out")
+                last_reach, idx = pick_out!(last_reach_list, solver.tree_search, visited, last_order)
+                # println("idx")
+                # println(idx)
+                # println(length(last_reach_list))
             end
             idx == -1 && return BasicResult(:holds), last_reach_list, last_children, last_order
+            # println("last layer size")
+            # println(size(problem.network.layers))
+            # println(size(problem.network.layers[end].weights))
+            # println(size(last_reach.sym.Low))
+            # println("---")
             reach = forward_layer(solver, problem.network.layers[end], last_reach, model)
             result = check_inclusion(reach.sym, problem.output, problem.network, model)
             result.status == :violated && return result, last_reach_list, last_children, last_order
             if result.status != :holds && !haskey(last_children, idx)
+                last_children[idx] = []
                 intervals = constraint_refinement(solver, problem.network, reach, model)
                 violated_results = nothing
                 for interval in intervals
@@ -129,7 +140,7 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
                 end
                 violated_results == nothing || return violated_results, last_reach_list, last_children, last_order
             end
-            result.status == :holds || (push!(last_reach_list, reach))
+            # result.status == :holds || (push!(last_reach_list, reach)) # why would I do this??????
         end
         return BasicResult(:unknown), last_reach_list, last_children, last_order
     else
@@ -179,8 +190,12 @@ end
 function forward_network(solver, nnet::Network, input::AbstractPolytope, model::JuMP.Model, return_last::Bool)
     reach = input
     last_reach = input
-    for layer in nnet.layers
-        last_reach = reach
+    for (i, layer) in enumerate(nnet.layers)
+        if i == length(nnet.layers)
+            last_reach = deepcopy(reach)
+            # println("last_reach")
+            # println(size(last_reach.sym.Low))
+        end
         reach = forward_layer(solver, layer, reach, model)
     end
     return_last && (return reach, last_reach)
@@ -203,6 +218,11 @@ end
 # Symbolic forward_linear
 function forward_linear(solver::AdaptNeurify, input::SymbolicIntervalGradient, layer::Layer)
     (W, b) = (layer.weights, layer.bias)
+    # println("===")
+    # println(size(W))
+    # println(size(b))
+    # println(size(input.sym.Up))
+    # println(size(input.sym.Low))
     output_Up = max.(W, 0) * input.sym.Up + min.(W, 0) * input.sym.Low
     output_Low = max.(W, 0) * input.sym.Low + min.(W, 0) * input.sym.Up
     output_Up[:, end] += b

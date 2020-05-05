@@ -26,7 +26,7 @@ Sound but not complete.
 """
 
 @with_kw struct Neurify
-    max_iter::Int64     = 100
+    max_iter::Int64     = 10
     tree_search::Symbol = :DFS # only :DFS/:BFS allowed? If so, we should assert this.
     model = Nothing()
 end
@@ -65,6 +65,7 @@ function solve(solver::Neurify, problem::Problem)
     result.status == :unknown || return result
     reach_list = SymbolicIntervalGradient[reach]
     for i in 2:solver.max_iter
+        print(i,' ')
         length(reach_list) > 0 || return BasicResult(:holds)
         reach = pick_out!(reach_list, solver.tree_search)
         intervals = constraint_refinement(solver, problem.network, reach, model)
@@ -103,15 +104,31 @@ function check_inclusion(reach::SymbolicInterval{HPolytope{N}}, output::Abstract
         end
         @objective(model, Max, obj' * [x; [1]])
         optimize!(model)
-
+    
         if termination_status(model) == MOI.OPTIMAL
             y = compute_output(nnet, value(x))
+            # println(y)
+            # println(output)
             if !∈(y, output)
                 if ∈(value(x), reach.interval)
                     return CounterExampleResult(:violated, value(x))
                 else
-                    print("OPTIMAL, but x not in the input set")
-                    exit()
+                    println("OPTIMAL, but x not in the input set")
+                    println("This is usually cased by precision problems, don't worry. But if you think this might be the source of problem, check it out in \"neurify.jl\".")
+                    # println(termination_status(model))
+                    # println("x")
+                    # println(value(x))
+                    # println("obj")
+                    # println(obj')
+                    # println("model")
+                    # println(model)
+                    # for k in 1:size(reach_lc, 1)
+                    #     println(reach_lc[k].a' * value(x),' ', reach_lc[k].b)
+                    # end
+                    # for k in 1:size(reach_lc, 1)
+                    #     println(k, ' ', reach_lc[k].a' * value(x) <= reach_lc[k].b)
+                    # end
+                    # exit()
                 end
             end
             if objective_value(model) > output.constraints[i].b
@@ -120,8 +137,16 @@ function check_inclusion(reach::SymbolicInterval{HPolytope{N}}, output::Abstract
         else
             if ∈(value(x), reach.interval)
                 println(termination_status(model))
-                print("Not OPTIMAL, but x in the input set")
-                # exit()
+                println("Not OPTIMAL, but x in the input set")
+                println("This is usually casued by unbounded input constraints, i.e. some dimensions can take arbitrary large values.")
+                println("x")
+                println(value(x))
+                println("obj")
+                println(obj)
+                println(obj')
+                println("model")
+                println(model)
+                exit()
             end
             return BasicResult(:unknown)
         end
@@ -129,82 +154,6 @@ function check_inclusion(reach::SymbolicInterval{HPolytope{N}}, output::Abstract
     end
     return BasicResult(:holds)
 end
-
-# function check_inclusion(reach::SymbolicInterval{HPolytope{N}}, output::AbstractPolytope, nnet::Network, model::JuMP.Model) where N
-#     # The output constraint is in the form A*x < b
-#     # We try to maximize output constraint to find a violated case, or to verify the inclusion, 
-#     # suppose the output is [1, 0, -1] * x < 2, Then we are maximizing reach.Up[1] * 1 + reach.Low[3] * (-1) 
-    
-#     x = model[:x]
-#     # reach_lc = reach.interval.constraints
-#     # output_lc = output.constraints
-#     # n = size(reach_lc, 1)
-#     # m = size(reach_lc[1].a, 1)
-#     # model =Model(with_optimizer(GLPK.Optimizer))
-#     # @variable(model, x[1:m])
-#     # @constraint(model, [i in 1:n], reach_lc[i].a' * x <= reach_lc[i].b)
-
-#     for i in 1:size(output.constraints, 1)
-#         obj = zeros(size(reach.Low, 2))
-#         for j in 1:size(reach.Low, 1)
-#             if output.constraints[i].a[j] > 0
-#                 obj += output.constraints[i].a[j] * reach.Up[j,:]
-#             else
-#                 obj += output.constraints[i].a[j] * reach.Low[j,:]
-#             end
-#         end
-#         @objective(model, Max, obj' * [x; [1]])
-#         optimize!(model)
-    
-#         if termination_status(model) == MOI.OPTIMAL
-#             y = compute_output(nnet, value(x))
-#             # println(y)
-#             # println(output)
-#             if !∈(y, output)
-#                 if ∈(value(x), reach.interval)
-#                     return CounterExampleResult(:violated, value(x))
-#                 else
-#                     println("OPTIMAL, but x not in the input set")
-#                     println("This is usually cased by precision problems, don't worry. But if you think this might be the source of problem, check it out in \"neurify.jl\".")
-#                     # println(termination_status(model))
-#                     # println("x")
-#                     # println(value(x))
-#                     # println("obj")
-#                     # println(obj')
-#                     # println("model")
-#                     # println(model)
-#                     # for k in 1:size(reach_lc, 1)
-#                     #     println(reach_lc[k].a' * value(x),' ', reach_lc[k].b)
-#                     # end
-#                     # for k in 1:size(reach_lc, 1)
-#                     #     println(k, ' ', reach_lc[k].a' * value(x) <= reach_lc[k].b)
-#                     # end
-#                     # exit()
-#                 end
-#             end
-#             if objective_value(model) > output.constraints[i].b
-#                 return BasicResult(:unknown)
-#             end
-#         else
-#             if ∈(value(x), reach.interval)
-#                 println(termination_status(model))
-#                 println("Not OPTIMAL, but x in the input set")
-#                 println("This is usually casued by unbounded input constraints, i.e. some dimensions can take arbitrary large values.")
-#                 println("x")
-#                 println(value(x))
-#                 println("obj")
-#                 println(obj)
-#                 println(obj')
-#                 println("model")
-#                 println(model)
-#                 exit()
-#             end
-#             return BasicResult(:unknown)
-#         end
-        
-#     end
-#     return BasicResult(:holds)
-# end
 
 function constraint_refinement(solver::Neurify, nnet::Network, reach::SymbolicIntervalGradient, model::JuMP.Model)
     i, j, gradient = get_nodewise_gradient(nnet, reach.LΛ, reach.UΛ)
