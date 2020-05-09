@@ -26,7 +26,7 @@ Sound but not complete.
 """
 
 @with_kw struct AdaptNeurify
-    max_iter::Int64     = 1000
+    max_iter::Int64     = 100
     tree_search::Symbol = :DFS # only :DFS/:BFS allowed? If so, we should assert this.
     model = Nothing()
 end
@@ -95,12 +95,12 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
     model =Model(with_optimizer(GLPK.Optimizer))
     @variable(model, x[1:m], base_name="x")
     @constraint(model, [i in 1:n], reach_lc[i].a' * x <= reach_lc[i].b)
-    println("start forwarding")
+    # println("start forwarding")
     init_reach, init_last_reach = forward_network(solver, problem.network, problem.input, model, true)
-    println("start checking")
+    # println("start checking")
     result = check_inclusion(init_reach.sym, problem.output, problem.network, model) # This called the check_inclusion function in ReluVal, because the constraints are Hyperrectangle
-    println("finish checking")
-    result.status == :unknown || return result, Tuple[], Dict(), []
+    # println("finish checking")
+    result.status == :unknown || return result, Tuple[], Dict(), [], 1 
     
     visited = falses(solver.max_iter*4) #if we visited n nodes, then there are at most 4*n nodes in the tree. because every node has 3 children.
     order = []
@@ -115,7 +115,7 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
             else
                 last_reach, idx = pick_out!(last_reach_list, solver.tree_search, visited, last_order)
             end
-            idx == -1 && return BasicResult(:holds), last_reach_list, last_children, last_order
+            idx == -1 && return BasicResult(:holds), last_reach_list, last_children, last_order, i
             # println("last layer size")
             # println(size(problem.network.layers))
             # println(size(problem.network.layers[end].weights))
@@ -123,7 +123,7 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
             # println("---")
             reach = forward_layer(solver, problem.network.layers[end], last_reach, model)
             result = check_inclusion(reach.sym, problem.output, problem.network, model)
-            result.status == :violated && return result, last_reach_list, last_children, last_order
+            result.status == :violated && return result, last_reach_list, last_children, last_order, i
             if result.status != :holds && !haskey(last_children, idx)
                 last_children[idx] = []
                 intervals = constraint_refinement(solver, problem.network, reach, model)
@@ -135,20 +135,17 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
                     push!(last_children[idx], length(last_reach_list))
                     result.status == :violated && (violated_results = result)
                 end
-                violated_results == nothing || return violated_results, last_reach_list, last_children, last_order
+                violated_results == nothing || return violated_results, last_reach_list, last_children, last_order, i
             end
             # result.status == :holds || (push!(last_reach_list, reach)) # This is a bug, why would I do this??????
         end
-        return BasicResult(:unknown), last_reach_list, last_children, last_order
+        return BasicResult(:unknown), last_reach_list, last_children, last_order, solver.max_iter
     else
         reach_list = [(init_reach,:unknown)]
         last_reach_list = [init_last_reach]
         for i in 1:solver.max_iter
-            if i%10 == 0
-                println("iter ",i)
-            end
             (reach, status), idx = pick_out!(reach_list, solver.tree_search, visited, order)
-            idx == -1 && return BasicResult(:holds), reach_list, children, order
+            idx == -1 && return BasicResult(:holds), reach_list, children, order, i
             status == :holds && continue
             intervals = constraint_refinement(solver, problem.network, reach, model)
             violated_results = nothing
@@ -161,10 +158,10 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
                 push!(last_reach_list, last_reach)
                 push!(children[idx], length(last_reach_list))
             end
-            violated_results == nothing || return violated_results, last_reach_list, children, order
+            violated_results == nothing || return violated_results, last_reach_list, children, order, i
         end
     end
-    return BasicResult(:unknown), last_reach_list, children, order
+    return BasicResult(:unknown), last_reach_list, children, order, solver.max_iter
 end
 
 
