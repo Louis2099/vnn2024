@@ -41,20 +41,20 @@ end
 function solve(solver::ReluVal, problem::Problem)
     reach = forward_network(solver, problem.network, problem.input)
     result = check_inclusion(reach.sym, problem.output, problem.network)
-    result.status == :unknown || return result
+    result.status == :unknown || return result, 1
     reach_list = SymbolicIntervalMask[reach]
     for i in 2:solver.max_iter
-        length(reach_list) > 0 || return BasicResult(:holds)
+        length(reach_list) > 0 || return BasicResult(:holds), i
         reach = pick_out!(reach_list, solver.tree_search)
         intervals = interval_refinement(problem.network, reach)
         for interval in intervals
             reach = forward_network(solver, problem.network, interval)
             result = check_inclusion(reach.sym, problem.output, problem.network)
-            result.status == :violated && return result
+            result.status == :violated && return result, i
             result.status == :holds || (push!(reach_list, reach))
         end
     end
-    return BasicResult(:unknown)
+    return BasicResult(:unknown), solver.max_iter
 end
 
 function interval_refinement(nnet::Network, reach::SymbolicIntervalMask)
