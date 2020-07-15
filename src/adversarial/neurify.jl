@@ -129,6 +129,11 @@ function check_inclusion(solver, reach::SymbolicInterval{HPolytope{N}}, output::
                     println("x = ", value(x))
                     println("A * x = ", obj * [value(x); [1]])
                     println("b = ", reach_lc[i].b)
+                    for k in 1:n
+                        println(reach_lc[k].a' * value(x), " < ", reach_lc[k].b)
+                        println(reach_lc[k].a' * value(x) <  reach_lc[k].b)
+                    end
+                    println("===")
                 end
             end
             if objective_value(model) > output_lc[i].b
