@@ -70,8 +70,8 @@ function solve(solver::Neurify, problem::Problem)
     model = Model(with_optimizer(GLPK.Optimizer))
     @variable(model, x[1:m], base_name="x")
     @constraint(model, [i in 1:n], reach_lc[i].a' * x <= reach_lc[i].b)
-    
-    reach = forward_network(solver, problem.network, problem.input)    
+
+    reach = forward_network(solver, problem.network, problem.input)
     result, max_violation_con = check_inclusion(solver, reach.sym, problem.output, problem.network) # This calls the check_inclusion function in ReluVal, because the constraints are Hyperrectangle
     result.status == :unknown || return result
 
@@ -121,20 +121,7 @@ function check_inclusion(solver, reach::SymbolicInterval{HPolytope{N}}, output::
         if termination_status(model) == MOI.OPTIMAL
             y = compute_output(nnet, value(x))
             if !∈(y, output)
-                if ∈(value(x), reach.interval)
-                    return CounterExampleResult(:violated, value(x)), nothing
-                else
-                    println("OPTIMAL, but x not in the input set")
-                    println("This is usually caused by precision problem, you can omit this")
-                    println("x = ", value(x))
-                    println("A * x = ", obj * [value(x); [1]])
-                    println("b = ", reach_lc[i].b)
-                    for k in 1:n
-                        println(reach_lc[k].a' * value(x), " < ", reach_lc[k].b)
-                        println(reach_lc[k].a' * value(x) <  reach_lc[k].b)
-                    end
-                    println("===")
-                end
+                return CounterExampleResult(:violated, value(x)), nothing
             end
             if objective_value(model) > output_lc[i].b
                 if objective_value(model) - output_lc[i].b > max_violation
@@ -145,8 +132,8 @@ function check_inclusion(solver, reach::SymbolicInterval{HPolytope{N}}, output::
         else
             if ∈(value(x), reach.interval)
                 println("Not OPTIMAL, but x in the input set")
-                println("This is usually caused by open shape input set.")
-                println("Check your input constraints.")
+                println("This is usually caused by open input set.")
+                println("Please check your input constraints.")
                 exit()
             end
             println("No solution, please check the problem definition.")
@@ -158,7 +145,7 @@ function check_inclusion(solver, reach::SymbolicInterval{HPolytope{N}}, output::
     return BasicResult(:holds), nothing
 end
 
-function constraint_refinement(solver::Neurify, nnet::Network, reach::SymbolicIntervalGradient, max_violation_con::Vector{Float64})
+function constraint_refinement(solver::Neurify, nnet::Network, reach::SymbolicIntervalGradient, max_violation_con::AbstractVector{Float64})
     i, j, influence = get_nodewise_influence(solver, nnet, reach, max_violation_con)
     # We can generate three more constraints
     # Symbolic representation of node i j is Low[i][j,:] and Up[i][j,:]
@@ -247,6 +234,8 @@ function forward_act(input::SymbolicIntervalGradient, layer::Layer{ReLU})
     mask_lower, mask_upper = zeros(Float64, n_node), ones(Float64, n_node)
     interval_width = zeros(Float64, n_node)
     for i in 1:n_node
+        println("node ",i)
+        println(input)
         if upper_bound(input.sym.Up[i, :], input.sym.interval) <= 0.0
             # Update to zero
             mask_lower[i], mask_upper[i] = 0, 0

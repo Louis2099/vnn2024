@@ -74,8 +74,6 @@ function solve(solver::AdaptNeurify, problem::Problem)
     return BasicResult(:unknown)
 end
 
-
-
 function pick_out!(reach_list, tree_search, visited, order)
     n = length(reach_list)
     if tree_search == :BFS
@@ -115,7 +113,7 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
     result = check_inclusion(init_reach.sym, problem.output, problem.network, model) # This called the check_inclusion function in ReluVal, because the constraints are Hyperrectangle
     # println("finish checking")
     result.status == :unknown || return result, Tuple[], Dict(), [], 1 
-    
+
     visited = falses(solver.max_iter*4) #if we visited n nodes, then there are at most 4*n nodes in the tree. because every node has 3 children.
     order = []
     children = Dict()
