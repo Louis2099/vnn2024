@@ -26,7 +26,7 @@ Sound but not complete.
 """
 
 @with_kw struct Neurify
-    max_iter::Int64     = 10
+    max_iter::Int64     = 15
     tree_search::Symbol = :DFS # only :DFS/:BFS allowed? If so, we should assert this.
 
     # Becuase of over-approximation, a split may not bisect the input set. 
@@ -58,6 +58,12 @@ struct SymbolicIntervalGradient
 end
 
 function solve(solver::Neurify, problem::Problem)
+
+    # println("problem.input")
+    # println(problem.input)
+    # println("problem.output")
+    # println(problem.output)
+    # exit()
 
     while !isempty(solver.splits) pop!(solver.splits) end
     problem = Problem(problem.network, convert(HPolytope, problem.input), convert(HPolytope, problem.output))
@@ -91,7 +97,7 @@ function solve(solver::Neurify, problem::Problem)
     return BasicResult(:unknown)
 end
 
-function check_inclusion(solver, reach::SymbolicInterval{HPolytope{N}}, output::AbstractPolytope, nnet::Network) where N
+function check_inclusion(solver, reach::SymbolicInterval{<:HPolytope}, output::AbstractPolytope, nnet::Network) where N
     # The output constraint is in the form A*x < b
     # We try to maximize output constraint to find a violated case, or to verify the inclusion.
     # Suppose the output is [1, 0, -1] * x < 2, Then we are maximizing reach.Up[1] * 1 + reach.Low[3] * (-1) 
@@ -164,7 +170,7 @@ function constraint_refinement(solver::Neurify, nnet::Network, reach::SymbolicIn
     return intervals
 end
 
-function get_nodewise_influence(solver::Neurify, nnet::Network, reach::SymbolicIntervalGradient, max_violation_con::Vector{Float64})
+function get_nodewise_influence(solver::Neurify, nnet::Network, reach::SymbolicIntervalGradient, max_violation_con::AbstractVector{Float64})
     n_output = size(nnet.layers[end].weights, 1)
     n_length = length(nnet.layers)
     # We want to find the node with the largest influence
@@ -202,6 +208,19 @@ function get_nodewise_influence(solver::Neurify, nnet::Network, reach::SymbolicI
     return max_tuple
 end
 
+function forward_network(solver::Neurify, nnet::Network, input::AbstractPolytope)
+    reach = input
+    # println("forward")
+    i = 0
+    for layer in nnet.layers
+        # println("layer ", i)
+        i += 1
+        reach = forward_layer(solver, layer, reach)
+    end
+    return reach
+end
+
+
 function forward_layer(solver::Neurify, layer::Layer, input)
     return forward_act(forward_linear(solver, input, layer), layer)
 end
@@ -234,8 +253,8 @@ function forward_act(input::SymbolicIntervalGradient, layer::Layer{ReLU})
     mask_lower, mask_upper = zeros(Float64, n_node), ones(Float64, n_node)
     interval_width = zeros(Float64, n_node)
     for i in 1:n_node
-        println("node ",i)
-        println(input)
+        # println("node i ", i)
+        # println("input ", input.sym.Up[i, :])
         if upper_bound(input.sym.Up[i, :], input.sym.interval) <= 0.0
             # Update to zero
             mask_lower[i], mask_upper[i] = 0, 0
@@ -251,11 +270,27 @@ function forward_act(input::SymbolicIntervalGradient, layer::Layer{ReLU})
             up_low = lower_bound(input.sym.Up[i, :], input.sym.interval)
             low_up = upper_bound(input.sym.Low[i, :], input.sym.interval)
             low_low = lower_bound(input.sym.Low[i, :], input.sym.interval)
-            up_slop = up_up / (up_up - up_low)
-            low_slop = low_up / (low_up - low_low)
-            output_Low[i, :] =  low_slop * output_Low[i, :]
-            output_Up[i, end] -= up_low
-            output_Up[i, :] = up_slop * output_Up[i, :]
+            if abs(up_up - up_low) < 1e-6
+                up_slop = 0
+                output_Up[i, :] = zeros(n_input)
+                output_Up[i, end] -= up_low
+            else
+                up_slop = up_up / (up_up - up_low)
+                 # the order of the following two lines are important
+                output_Up[i, end] -= up_low
+                output_Up[i, :] = up_slop * output_Up[i, :]
+            end
+            
+            if abs(low_up - low_low) < 1e-6
+                low_slop = 0
+                output_Low[i, :] = zeros(n_input)
+                output_Low[i, end] -= low_low
+            else
+                low_slop = low_up / (low_up - low_low)
+                output_Low[i, :] =  low_slop * output_Low[i, :]
+            end
+            
+            
             mask_lower[i], mask_upper[i] = low_slop, up_slop
             interval_width[i] = up_up - low_low
         end
