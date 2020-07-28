@@ -83,13 +83,13 @@ export BaB, Sherlock, Reluplex
 
 include("satisfiability/planet.jl")
 export Planet
-
 include("adversarial/neurify.jl")
 include("adversarial/reluVal.jl")
+include("adversarial/adaptNeurify.jl")
 include("adversarial/fastLin.jl")
 include("adversarial/fastLip.jl")
 include("adversarial/dlv.jl")
-export ReluVal, Neurify, FastLin, FastLip, DLV
+export ReluVal, Neurify, AdaptNeurify, FastLin, FastLip, DLV
 
 const TOL = Ref(sqrt(eps()))
 set_tolerance(x::Real) = (TOL[] = x)

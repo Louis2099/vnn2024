@@ -143,7 +143,7 @@ function check_inclusion(solver, reach::SymbolicInterval{<:HPolytope}, output::A
 end
 
 function constraint_refinement(solver::Neurify, nnet::Network, reach::SymbolicIntervalGradient, max_violation_con::AbstractVector{Float64}, splits::Vector)
-    i, j, influence = get_nodewise_influence(solver, nnet, reach, max_violation_con, splits)
+    i, j, influence = get_nodewise_influence(nnet, reach, max_violation_con, splits)
     # We can generate three more constraints
     # Symbolic representation of node i j is Low[i][j,:] and Up[i][j,:]
     nnet_new = Network(nnet.layers[1:i])
@@ -173,7 +173,7 @@ function construct_interval(A::AbstractMatrix{N}, b::AbstractVector{N}) where {N
     return HPolytope(A, b)
 end
 
-function get_nodewise_influence(solver::Neurify, nnet::Network, reach::SymbolicIntervalGradient, max_violation_con::AbstractVector{Float64}, splits::Vector)
+function get_nodewise_influence(nnet::Network, reach::SymbolicIntervalGradient, max_violation_con::AbstractVector{Float64}, splits::Vector)
     n_output = size(nnet.layers[end].weights, 1)
     n_length = length(nnet.layers)
     # We want to find the node with the largest influence
@@ -213,19 +213,6 @@ function get_nodewise_influence(solver::Neurify, nnet::Network, reach::SymbolicI
     push!(splits, max_tuple)
     return max_tuple
 end
-
-function forward_network(solver::Neurify, nnet::Network, input::AbstractPolytope)
-    reach = input
-    # println("forward")
-    i = 0
-    for layer in nnet.layers
-        # println("layer ", i)
-        i += 1
-        reach = forward_layer(solver, layer, reach)
-    end
-    return reach
-end
-
 
 function forward_layer(solver::Neurify, layer::Layer, input)
     return forward_act(forward_linear(solver, input, layer), layer)

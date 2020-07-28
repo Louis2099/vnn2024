@@ -28,21 +28,11 @@ Sound but not complete.
 @with_kw struct AdaptNeurify
     max_iter::Int64     = 10
     tree_search::Symbol = :DFS # only :DFS/:BFS allowed? If so, we should assert this.
-
-    # Becuase of over-approximation, a split may not bisect the input set. 
-    # Therefore, the gradient remains unchanged (since input didn't change).
-    # And this node will be chosen to split forever.
-    # To prevent this, we split each node only once if the gradient of this node doesn't change. 
-    # Each element in splits is a tuple (gradient_of_the_node, layer_index, node_index).
-
-    splits = Set() # To prevent infinity loop.
-
-    # But in some cases (which I don't have an example, just a sense), 
-    # it can happen that a node indeed needs to be split twice with the same gradient.
 end
 
+
 function solve(solver::AdaptNeurify, problem::Problem)
-    while !isempty(solver.splits) pop!(solver.splits) end
+
     problem = Problem(problem.network, convert(HPolytope, problem.input), convert(HPolytope, problem.output))
 
     reach_lc = problem.input.constraints
@@ -50,25 +40,34 @@ function solve(solver::AdaptNeurify, problem::Problem)
 
     n = size(reach_lc, 1)
     m = size(reach_lc[1].a, 1)
-    model = Model(with_optimizer(GLPK.Optimizer))
+    model = Model(GLPK.Optimizer)
     @variable(model, x[1:m], base_name="x")
     @constraint(model, [i in 1:n], reach_lc[i].a' * x <= reach_lc[i].b)
-    
-    reach = forward_network(solver, problem.network, problem.input)    
+
+    reach = forward_network(solver, problem.network, problem.input)
     result, max_violation_con = check_inclusion(solver, reach.sym, problem.output, problem.network) # This calls the check_inclusion function in ReluVal, because the constraints are Hyperrectangle
     result.status == :unknown || return result
 
-    reach_list = [(reach, max_violation_con)]
+    reach_list=Array{Any,1}()
+    push!(reach_list, (reach, max_violation_con, Vector()))
+
+    # Becuase of over-approximation, a split may not bisect the input set. 
+    # Therefore, the gradient remains unchanged (since input didn't change).
+    # And this node will be chosen to split forever.
+    # To prevent this, we split each node only once if the gradient of this node hasn't change. 
+    # Each element in splits is a tuple (gradient_of_the_node, layer_index, node_index).
+    splits = Set() # To prevent infinity loop.
 
     for i in 2:solver.max_iter
         length(reach_list) > 0 || return BasicResult(:holds)
-        reach, max_violation_con = pick_out!(reach_list, solver.tree_search)
-        intervals = constraint_refinement(solver, problem.network, reach, max_violation_con)
+        reach, max_violation_con, splits = pick_out!(reach_list, solver.tree_search)
+        intervals = constraint_refinement(solver, problem.network, reach, max_violation_con, splits)
         for interval in intervals
+            isempty(interval) && continue
             reach = forward_network(solver, problem.network, interval)
             result, max_violation_con = check_inclusion(solver, reach.sym, problem.output, problem.network)
             result.status == :violated && return result
-            result.status == :holds || (push!(reach_list, (reach, max_violation_con)))
+            result.status == :holds || (push!(reach_list, (reach, max_violation_con, copy(splits))))
         end
     end
     return BasicResult(:unknown)
@@ -96,7 +95,59 @@ function pick_out!(reach_list, tree_search, visited, order)
     return reach, i
 end
 
-function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_children, last_order, follow_previous_tree) # assume the input range doesn't change, and only the last layer's weights change
+
+# function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_children, last_order, follow_previous_tree) # assume the input range doesn't change, and only the last layer's weights change
+
+#     problem = Problem(problem.network, convert(HPolytope, problem.input), convert(HPolytope, problem.output))
+
+#     reach_lc = problem.input.constraints
+#     output_lc = problem.output.constraints
+
+#     n = size(reach_lc, 1)
+#     m = size(reach_lc[1].a, 1)
+#     model = Model(GLPK.Optimizer)
+#     @variable(model, x[1:m], base_name="x")
+#     @constraint(model, [i in 1:n], reach_lc[i].a' * x <= reach_lc[i].b)
+
+#     # println("start forwarding")
+#     init_reach, init_last_reach = forward_network(solver, problem.network, problem.input, model, true)
+#     # println("start checking")
+#     result = check_inclusion(init_reach.sym, problem.output, problem.network, model) # This called the check_inclusion function in ReluVal, because the constraints are Hyperrectangle
+#     # println("finish checking")
+#     result.status == :unknown || return result, Tuple[], Dict(), [], 1 
+
+#     visited = falses(solver.max_iter*4) #if we visited n nodes, then there are at most 4*n nodes in the tree. because every node has 3 children.
+#     order = []
+#     children = Dict()
+
+#     reach_list=Array{Any,1}()
+#     push!(reach_list, (reach, max_violation_con, Vector()))
+
+#     # Becuase of over-approximation, a split may not bisect the input set. 
+#     # Therefore, the gradient remains unchanged (since input didn't change).
+#     # And this node will be chosen to split forever.
+#     # To prevent this, we split each node only once if the gradient of this node hasn't change. 
+#     # Each element in splits is a tuple (gradient_of_the_node, layer_index, node_index).
+#     splits = Set() # To prevent infinity loop.
+
+#     for i in 2:solver.max_iter
+#         length(reach_list) > 0 || return BasicResult(:holds)
+#         reach, max_violation_con, splits = pick_out!(reach_list, solver.tree_search)
+#         intervals = constraint_refinement(solver, problem.network, reach, max_violation_con, splits)
+#         for interval in intervals
+#             isempty(interval) && continue
+#             reach = forward_network(solver, problem.network, interval)
+#             result, max_violation_con = check_inclusion(solver, reach.sym, problem.output, problem.network)
+#             result.status == :violated && return result
+#             result.status == :holds || (push!(reach_list, (reach, max_violation_con, copy(splits))))
+#         end
+#     end
+#     return BasicResult(:unknown)
+# end
+
+
+function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_children, last_order, follow_previous_tree) 
+    # assume the input range doesn't change, and only the last layer's weights change
     problem = Problem(problem.network, convert(HPolytope, problem.input), convert(HPolytope, problem.output))
 
     reach_lc = problem.input.constraints
@@ -111,6 +162,7 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
     init_reach, init_last_reach = forward_network(solver, problem.network, problem.input, model, true)
     # println("start checking")
     result = check_inclusion(init_reach.sym, problem.output, problem.network, model) # This called the check_inclusion function in ReluVal, because the constraints are Hyperrectangle
+    result, max_violation_con = check_inclusion(solver, reach.sym, problem.output, problem.network) # This calls the check_inclusion function in ReluVal, because the constraints are Hyperrectangle
     # println("finish checking")
     result.status == :unknown || return result, Tuple[], Dict(), [], 1 
 
@@ -177,40 +229,42 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
 end
 
 
-function constraint_refinement(solver::AdaptNeurify, nnet::Network, reach::SymbolicIntervalGradient, model::JuMP.Model)
-    i, j, gradient = get_nodewise_gradient(nnet, reach.LΛ, reach.UΛ)
+function constraint_refinement(solver::AdaptNeurify, nnet::Network, reach::SymbolicIntervalGradient, max_violation_con::AbstractVector{Float64}, splits::Vector)
+    i, j, influence = get_nodewise_influence(nnet, reach, max_violation_con, splits)
     # We can generate three more constraints
     # Symbolic representation of node i j is Low[i][j,:] and Up[i][j,:]
     nnet_new = Network(nnet.layers[1:i])
-    reach_new = forward_network(solver, nnet_new, reach.sym.interval, model)
+    reach_new = forward_network(solver, nnet_new, reach.sym.interval)
     C, d = tosimplehrep(reach.sym.interval)
     l_sym = reach_new.sym.Low[[j], 1:end-1]
     l_off = reach_new.sym.Low[[j], end]
     u_sym = reach_new.sym.Up[[j], 1:end-1]
     u_off = reach_new.sym.Up[[j], end]
-    intervals = Vector{HPolytope{Float64}}(undef, 3)
-    intervals[1] = HPolytope([C; l_sym; u_sym], [d; -l_off; -u_off])
-    intervals[2] = HPolytope([C; l_sym; -u_sym], [d; -l_off; u_off])
-    intervals[3] = HPolytope([C; -l_sym; -u_sym], [d; l_off; u_off])
+    intervals = Vector(undef, 3)
+    # remove zero constraints and construct new intervals
+    intervals[1] = construct_interval([C; l_sym; u_sym], [d; -l_off; -u_off])
+    intervals[2] = construct_interval([C; l_sym; -u_sym], [d; -l_off; u_off])
+    intervals[3] = construct_interval([C; -l_sym; -u_sym], [d; l_off; u_off])
     # intervals[4] = HPolytope([C; -l_sym; u_sym], [d; l_off; -u_off]) lower bound can not be greater than upper bound
     return intervals
 end
 
-function forward_network(solver, nnet::Network, input::AbstractPolytope, model::JuMP.Model, return_last::Bool)
+function forward_network(solver, nnet::Network, input::AbstractPolytope, return_last::Bool)
     reach = input
     last_reach = input
     for (i, layer) in enumerate(nnet.layers)
         if i == length(nnet.layers)
             last_reach = deepcopy(reach)
         end
-        reach = forward_layer(solver, layer, reach, model)
+        reach = forward_layer(solver, layer, reach)
     end
     return_last && (return reach, last_reach)
     return reach
 end
 
-function forward_layer(solver::AdaptNeurify, layer::Layer, input, model::JuMP.Model)
-    return forward_act(forward_linear(solver, input, layer), layer, model)
+
+function forward_layer(solver::AdaptNeurify, layer::Layer, input)
+    return forward_act(forward_linear(solver, input, layer), layer)
 end
 
 # Symbolic forward_linear for the first layer
@@ -219,7 +273,8 @@ function forward_linear(solver::AdaptNeurify, input::AbstractPolytope, layer::La
     sym = SymbolicInterval(hcat(W, b), hcat(W, b), input)
     LΛ = Vector{Vector{Int64}}(undef, 0)
     UΛ = Vector{Vector{Int64}}(undef, 0)
-    return SymbolicIntervalGradient(sym, LΛ, UΛ)
+    r = Vector{Vector{Int64}}(undef, 0)
+    return SymbolicIntervalGradient(sym, LΛ, UΛ, r)
 end
 
 # Symbolic forward_linear
@@ -230,5 +285,5 @@ function forward_linear(solver::AdaptNeurify, input::SymbolicIntervalGradient, l
     output_Up[:, end] += b
     output_Low[:, end] += b
     sym = SymbolicInterval(output_Low, output_Up, input.sym.interval)
-    return SymbolicIntervalGradient(sym, input.LΛ, input.UΛ)
+    return SymbolicIntervalGradient(sym, input.LΛ, input.UΛ, input.r)
 end
