@@ -95,6 +95,78 @@ function pick_out!(reach_list, tree_search, visited, order)
     return reach, i
 end
 
+function pick_out!(branches, tree_search, visited, order)
+    n = length(reach_list)
+    if tree_search == :BFS
+        i = 1
+        while i <= n && visited[i]
+            i+=1
+        end
+    else
+        i = length(reach_list)
+        while i >= 1 && visited[i]
+            i-=1
+        end
+    end
+    if i < 1 || i > n
+        return nothing, -1
+    end
+    reach = reach_list[i]
+    visited[i] = true
+    push!(order, i)
+    return reach, i
+end
+
+function solve(solver::AdaptNeurify, problem::Problem, branches::Tree = nothing)
+
+    problem = Problem(problem.network, convert(HPolytope, problem.input), convert(HPolytope, problem.output))
+
+    reach_lc = problem.input.constraints
+    output_lc = problem.output.constraints
+
+    n = size(reach_lc, 1)
+    m = size(reach_lc[1].a, 1)
+    model = Model(GLPK.Optimizer)
+    @variable(model, x[1:m], base_name="x")
+    @constraint(model, [i in 1:n], reach_lc[i].a' * x <= reach_lc[i].b)
+
+    reach, last_reach = forward_network(solver, problem.network, problem.input, true)
+
+    result, max_violation_con = check_inclusion(solver, reach.sym, problem.output, problem.network) # This calls the check_inclusion function in ReluVal, because the constraints are Hyperrectangle
+    result.status == :unknown || return result
+
+    if branches === nothing
+        branches = Tree(last_reach)
+    end
+
+    # check all existing branches, find the leaves whose status is unknown
+    unknown_leaves = bfs_check(branches)
+
+    # split these unknown leaves if there is spared quotas
+    for i in size(branches):solver.max_iter
+        reach, max_violation_con = pick_out!(unknown_leaves)
+    end
+
+
+    reach_list=Array{Any,1}()
+    push!(reach_list, (reach, max_violation_con, Vector()))
+
+    splits = Set() # To prevent infinity loop.
+    for i in 2:solver.max_iter
+        length(reach_list) > 0 || return BasicResult(:holds)
+        reach, max_violation_con, splits = pick_out!(reach_list, solver.tree_search)
+        intervals = constraint_refinement(solver, problem.network, reach, max_violation_con, splits)
+        for interval in intervals
+            isempty(interval) && continue
+            reach, last_reach = forward_network(solver, problem.network, interval, true)
+            result, max_violation_con = check_inclusion(solver, reach.sym, problem.output, problem.network)
+            result.status == :violated && return result
+            result.status == :holds || (push!(reach_list, (reach, max_violation_con, copy(splits))))
+            add_child!(branches, last_reach)
+        end
+    end
+    return BasicResult(:unknown)
+end
 
 # function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_children, last_order, follow_previous_tree) # assume the input range doesn't change, and only the last layer's weights change
 
@@ -159,9 +231,9 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
     @variable(model, x[1:m], base_name="x")
     @constraint(model, [i in 1:n], reach_lc[i].a' * x <= reach_lc[i].b)
     # println("start forwarding")
-    init_reach, init_last_reach = forward_network(solver, problem.network, problem.input, model, true)
+    init_reach, init_last_reach = forward_network(solver, problem.network, problem.input, true)
     # println("start checking")
-    result = check_inclusion(init_reach.sym, problem.output, problem.network, model) # This called the check_inclusion function in ReluVal, because the constraints are Hyperrectangle
+    result = check_inclusion(init_reach.sym, problem.output, problem.network) # This called the check_inclusion function in ReluVal, because the constraints are Hyperrectangle
     result, max_violation_con = check_inclusion(solver, reach.sym, problem.output, problem.network) # This calls the check_inclusion function in ReluVal, because the constraints are Hyperrectangle
     # println("finish checking")
     result.status == :unknown || return result, Tuple[], Dict(), [], 1 
@@ -169,6 +241,8 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
     visited = falses(solver.max_iter*4) #if we visited n nodes, then there are at most 4*n nodes in the tree. because every node has 3 children.
     order = []
     children = Dict()
+
+    t = Tree((init_last_reach, ))
 
     if follow_previous_tree
         for i in 1:solver.max_iter
@@ -185,16 +259,16 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
             # println(size(problem.network.layers[end].weights))
             # println(size(last_reach.sym.Low))
             # println("---")
-            reach = forward_layer(solver, problem.network.layers[end], last_reach, model)
-            result = check_inclusion(reach.sym, problem.output, problem.network, model)
+            reach = forward_layer(solver, problem.network.layers[end], last_reach)
+            result = check_inclusion(reach.sym, problem.output, problem.network)
             result.status == :violated && return result, last_reach_list, last_children, last_order, i
             if result.status != :holds && !haskey(last_children, idx)
                 last_children[idx] = []
-                intervals = constraint_refinement(solver, problem.network, reach, model)
+                intervals = constraint_refinement(solver, problem.network, reach)
                 violated_results = nothing
                 for interval in intervals
-                    reach, last_reach = forward_network(solver, problem.network, interval, model, true)
-                    result = check_inclusion(reach.sym, problem.output, problem.network, model)
+                    reach, last_reach = forward_network(solver, problem.network, interval, true)
+                    result = check_inclusion(reach.sym, problem.output, problem.network)
                     push!(last_reach_list, last_reach)
                     push!(last_children[idx], length(last_reach_list))
                     result.status == :violated && (violated_results = result)
@@ -228,8 +302,7 @@ function solve(solver::AdaptNeurify, problem::Problem, last_reach_list, last_chi
     return BasicResult(:unknown), last_reach_list, children, order, solver.max_iter
 end
 
-
-function constraint_refinement(solver::AdaptNeurify, nnet::Network, reach::SymbolicIntervalGradient, max_violation_con::AbstractVector{Float64}, splits::Vector)
+function constraint_refinement(solver::Neurify, nnet::Network, reach::SymbolicIntervalGradient, max_violation_con::AbstractVector{Float64}, splits::Vector)
     i, j, influence = get_nodewise_influence(nnet, reach, max_violation_con, splits)
     # We can generate three more constraints
     # Symbolic representation of node i j is Low[i][j,:] and Up[i][j,:]
@@ -261,7 +334,6 @@ function forward_network(solver, nnet::Network, input::AbstractPolytope, return_
     return_last && (return reach, last_reach)
     return reach
 end
-
 
 function forward_layer(solver::AdaptNeurify, layer::Layer, input)
     return forward_act(forward_linear(solver, input, layer), layer)
