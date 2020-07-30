@@ -76,7 +76,7 @@ function solve(solver::Neurify, problem::Problem)
     for i in 2:solver.max_iter
         length(reach_list) > 0 || return BasicResult(:holds)
         reach, max_violation_con, splits = pick_out!(reach_list, solver.tree_search)
-        intervals = constraint_refinement(solver, problem.network, reach, max_violation_con, splits)
+        intervals = constraint_refinement!(solver, problem.network, reach, max_violation_con, splits)
         for interval in intervals
             isempty(interval) && continue
             reach = forward_network(solver, problem.network, interval)
@@ -102,7 +102,7 @@ function check_inclusion(solver, reach::SymbolicInterval{<:HPolytope}, output::A
     @variable(model, x[1:m])
     @constraint(model, [i in 1:n], reach_lc[i].a' * x <= reach_lc[i].b)
     max_violation = -1e9
-    max_violation_con = nothing
+    max_violation_con = LazySets.Arrays.SingleEntryVector{Float64}(0,0)
     for i in 1:size(output_lc, 1)
         obj = zeros(size(reach.Low, 2))
         for j in 1:size(reach.Low, 1)
@@ -118,7 +118,7 @@ function check_inclusion(solver, reach::SymbolicInterval{<:HPolytope}, output::A
         if termination_status(model) == MOI.OPTIMAL
             y = compute_output(nnet, value(x))
             if !∈(y, output)
-                return CounterExampleResult(:violated, value(x)), nothing
+                return CounterExampleResult(:violated, value(x)), LazySets.Arrays.SingleEntryVector{Float64}(0,0)
             end
             if objective_value(model) > output_lc[i].b
                 if objective_value(model) - output_lc[i].b > max_violation
@@ -139,11 +139,12 @@ function check_inclusion(solver, reach::SymbolicInterval{<:HPolytope}, output::A
         
     end
     max_violation > 0 && return BasicResult(:unknown), max_violation_con
-    return BasicResult(:holds), nothing
+    return BasicResult(:holds), LazySets.Arrays.SingleEntryVector{Float64}(0,0)
 end
 
-function constraint_refinement(solver::Neurify, nnet::Network, reach::SymbolicIntervalGradient, max_violation_con::AbstractVector{Float64}, splits::Vector)
+function constraint_refinement!(solver::Neurify, nnet::Network, reach::SymbolicIntervalGradient, max_violation_con::AbstractVector{Float64}, splits::Vector)
     i, j, influence = get_nodewise_influence(nnet, reach, max_violation_con, splits)
+    push!(splits, (i, j, influence))
     # We can generate three more constraints
     # Symbolic representation of node i j is Low[i][j,:] and Up[i][j,:]
     nnet_new = Network(nnet.layers[1:i])
@@ -190,8 +191,8 @@ function get_nodewise_influence(nnet::Network, reach::SymbolicIntervalGradient, 
             for j in 1:size(layer.bias,1)
                 if (0 < reach.LΛ[i][j] < 1) || (0 < reach.UΛ[i][j] < 1)
                     max_gradient = max(abs(LG[j]), abs(UG[j]))
-                    # influence = max_gradient * reach.r[i][j] * k # This k is different from original paper, but can improve the split efficiency.
-                    influence = max_gradient * reach.r[i][j]
+                    influence = max_gradient * reach.r[i][j] * k # This k is different from original paper, but can improve the split efficiency.
+                    # influence = max_gradient * reach.r[i][j]
                     if in((i,j, influence), splits) # To prevent infinity loop
                         continue
                     end
@@ -211,7 +212,6 @@ function get_nodewise_influence(nnet::Network, reach::SymbolicIntervalGradient, 
         println("Can not find valid node to split")
         exit()
     end
-    push!(splits, max_tuple)
     return max_tuple
 end
 

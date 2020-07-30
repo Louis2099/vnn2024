@@ -30,6 +30,6 @@ function is_leaf(t::Tree, x::Int)
     return in(x, t.leaves)
 end
 
-function size(t::Tree)
+function tree_size(t::Tree)
     return length(t.data)
 end
