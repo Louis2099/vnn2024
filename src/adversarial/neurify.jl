@@ -154,16 +154,17 @@ function constraint_refinement!(solver::Neurify, nnet::Network, reach::SymbolicI
     l_off = reach_new.sym.Low[[j], end]
     u_sym = reach_new.sym.Up[[j], 1:end-1]
     u_off = reach_new.sym.Up[[j], end]
-    intervals = Vector(undef, 3)
+    intervals = []
     # remove zero constraints and construct new intervals
-    intervals[1] = construct_interval([C; l_sym; u_sym], [d; -l_off; -u_off])
-    intervals[2] = construct_interval([C; l_sym; -u_sym], [d; -l_off; u_off])
-    intervals[3] = construct_interval([C; -l_sym; -u_sym], [d; l_off; u_off])
+    append_interval!(intervals, [C; l_sym; u_sym], [d; -l_off; -u_off])
+    append_interval!(intervals, [C; l_sym; -u_sym], [d; -l_off; u_off])
+    append_interval!(intervals, [C; -l_sym; -u_sym], [d; l_off; u_off])
     # intervals[4] = HPolytope([C; -l_sym; u_sym], [d; l_off; -u_off]) lower bound can not be greater than upper bound
     return intervals
 end
 
-function construct_interval(A::AbstractMatrix{N}, b::AbstractVector{N}) where {N<:Real}
+function append_interval!(intervals::Vector, A::AbstractMatrix{N}, b::AbstractVector{N}) where {N<:Real}
+    # remove zero constraints and check whether the new interval is empty.
     m = size(A, 1)
     zero_idx = []
     for i in 1:m
@@ -171,7 +172,8 @@ function construct_interval(A::AbstractMatrix{N}, b::AbstractVector{N}) where {N
     end
     A = A[setdiff(1:end, zero_idx), :]
     b = b[setdiff(1:end, zero_idx)]
-    return HPolytope(A, b)
+    interval = HPolytope(A, b)
+    isempty(interval) || push!(intervals, interval)
 end
 
 function get_nodewise_influence(nnet::Network, reach::SymbolicIntervalGradient, max_violation_con::AbstractVector{Float64}, splits::Vector)
