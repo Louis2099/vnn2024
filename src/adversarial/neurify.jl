@@ -35,7 +35,7 @@ Sound but not complete.
 end
 
 
-function solve(solver::Neurify, problem::Problem)
+function solve(solver::Neurify, problem::Problem, splits_order)
     isbounded(problem.input) || throw(UnboundedInputError("Neurify can only handle bounded input sets."))
 
     # Because of over-approximation, a split may not bisect the input set.
@@ -48,26 +48,39 @@ function solve(solver::Neurify, problem::Problem)
     reach_list = []
     domain = init_symbolic_grad(problem.input)
     splits = Set()
+    max_max_vio = 0
+    final_result = CounterExampleResult(:holds)
     for i in 1:solver.max_iter
         if i > 1
             domain, splits = select!(reach_list, solver.tree_search)
         end
 
         reach = forward_network(solver, nnet, domain)
-        result, max_violation_con = check_inclusion(solver, nnet, last(reach).sym, output)
+        result, max_violation_con, max_violation = check_inclusion(solver, nnet, last(reach).sym, output)
+        # println("splits: ", splits)
+        # println("max vio: ", max_violation)
 
         if result.status === :violated
-            return result
-        elseif result.status === :unknown
-            subdomains = constraint_refinement(nnet, reach, max_violation_con, splits)
-            for domain in subdomains
-                push!(reach_list, (init_symbolic_grad(domain), copy(splits)))
-            end
-
+            final_result = result
         end
-        isempty(reach_list) && return CounterExampleResult(:holds)
+
+        if result.status != :holds
+            k = length(splits)
+            if k < length(splits_order)
+                subdomains = constraint_refinement(nnet, reach, max_violation_con, splits, splits_order[k+1])
+                for domain in subdomains
+                    push!(reach_list, (init_symbolic_grad(domain), copy(splits)))
+                end
+            else
+                max_max_vio = max(max_max_vio, max_violation)
+                if final_result.status === :holds
+                    final_result = CounterExampleResult(:unknown)
+                end
+            end
+        end
+        isempty(reach_list) && break
     end
-    return CounterExampleResult(:unknown)
+    return final_result, max_max_vio
 end
 
 function check_inclusion(solver::Neurify, nnet::Network,
@@ -95,7 +108,7 @@ function check_inclusion(solver::Neurify, nnet::Network,
 
         if termination_status(model) == OPTIMAL
             if compute_output(nnet, value(x)) ∉ output
-                return CounterExampleResult(:violated, value(x)), nothing
+                return CounterExampleResult(:violated, value(x)), nothing, 0
             end
 
             viol = objective_value(model)
@@ -111,18 +124,21 @@ function check_inclusion(solver::Neurify, nnet::Network,
     end
 
     if max_violation > 0.0
-        return CounterExampleResult(:unknown), max_violation_con
+        return CounterExampleResult(:unknown), max_violation_con, max_violation
     else
-        return CounterExampleResult(:holds), nothing
+        return CounterExampleResult(:holds), nothing, 0
     end
 end
 
 function constraint_refinement(nnet::Network,
                                reach::Vector{<:SymbolicIntervalGradient},
-                               max_violation_con::AbstractVector{Float64},
-                               splits)
+                               max_violation_con, splits, given_split)
 
-    i, j, influence = get_max_nodewise_influence(nnet, reach, max_violation_con, splits)
+    # i, j, influence = get_max_nodewise_influence(nnet, reach, max_violation_con, splits)
+    i, j = given_split
+    influence = 0
+    push!(splits, (i, j, influence))
+
     # We can generate three more constraints
     # Symbolic representation of node i j is Low[i][j,:] and Up[i][j,:]
     aL, bL = reach[i].sym.Low[j, 1:end-1], reach[i].sym.Low[j, end]
@@ -189,8 +205,6 @@ function get_max_nodewise_influence(nnet::Network,
 
     # NOTE can omit this line in the paper version
     (i_max == 0 || j_max == 0) && error("Can not find valid node to split")
-
-    push!(splits, (i_max, j_max, influence_max))
 
     return (i_max, j_max, influence_max)
 end
