@@ -48,7 +48,7 @@ function solve(solver::Neurify, problem::Problem, splits_order)
     reach_list = []
     domain = init_symbolic_grad(problem.input)
     splits = Set()
-    max_max_vio = 0
+    max_max_vio = -1e9
     final_result = CounterExampleResult(:holds)
     for i in 1:solver.max_iter
         if i > 1
@@ -57,25 +57,22 @@ function solve(solver::Neurify, problem::Problem, splits_order)
 
         reach = forward_network(solver, nnet, domain)
         result, max_violation_con, max_violation = check_inclusion(solver, nnet, last(reach).sym, output)
-        # println("splits: ", splits)
-        # println("max vio: ", max_violation)
 
         if result.status === :violated
             final_result = result
         end
-
-        if result.status != :holds
-            k = length(splits)
-            if k < length(splits_order)
-                subdomains = constraint_refinement(nnet, reach, max_violation_con, splits, splits_order[k+1])
-                for domain in subdomains
-                    push!(reach_list, (init_symbolic_grad(domain), copy(splits)))
-                end
-            else
-                max_max_vio = max(max_max_vio, max_violation)
-                if final_result.status === :holds
-                    final_result = CounterExampleResult(:unknown)
-                end
+        
+        k = length(splits)
+        if k < length(splits_order)
+            subdomains = constraint_refinement(nnet, reach, max_violation_con, splits, splits_order[k+1])
+            for domain in subdomains
+                push!(reach_list, (init_symbolic_grad(domain), copy(splits)))
+            end
+        else
+            println(splits, " ", max_violation)
+            max_max_vio = max(max_max_vio, max_violation)
+            if final_result.status === :holds
+                final_result = result
             end
         end
         isempty(reach_list) && break
@@ -95,7 +92,7 @@ function check_inclusion(solver::Neurify, nnet::Network,
     x = @variable(model, [1:dim(input_domain)])
     add_set_constraint!(model, input_domain, x)
 
-    max_violation = 0.0
+    max_violation = -1e9
     max_violation_con = nothing
     for (i, cons) in enumerate(constraints_list(output))
         # NOTE can be taken out of the loop, but maybe there's no advantage
@@ -107,15 +104,18 @@ function check_inclusion(solver::Neurify, nnet::Network,
         optimize!(model)
 
         if termination_status(model) == OPTIMAL
-            if compute_output(nnet, value(x)) ∉ output
-                return CounterExampleResult(:violated, value(x)), nothing, 0
-            end
 
             viol = objective_value(model)
+
             if viol > max_violation
                 max_violation = viol
                 max_violation_con = a
             end
+
+            if compute_output(nnet, value(x)) ∉ output
+                return CounterExampleResult(:violated, value(x)), nothing, max_violation
+            end
+
         else
             # TODO can we be more descriptive?
             error("No solution, please check the problem definition.")
@@ -126,7 +126,7 @@ function check_inclusion(solver::Neurify, nnet::Network,
     if max_violation > 0.0
         return CounterExampleResult(:unknown), max_violation_con, max_violation
     else
-        return CounterExampleResult(:holds), nothing, 0
+        return CounterExampleResult(:holds), nothing, max_violation
     end
 end
 
