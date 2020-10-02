@@ -50,6 +50,14 @@ struct Problem{P, Q}
     output::Q
 end
 
+
+struct TrainingProblem{P, Q}
+    networks::Array
+    input::P
+    output::Q
+end
+
+
 """
     Result
 Supertype of all result types.

@@ -66,5 +66,3 @@ function test()
     @assert t.size == 2
     print_tree(t)
 end
-
-test()

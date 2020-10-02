@@ -45,6 +45,7 @@ export
     GeneralAct,
     PiecewiseLinear,
     Problem,
+    TrainingProblem,
     Result,
     BasicResult,
     CounterExampleResult,
@@ -91,6 +92,8 @@ include("adversarial/fastLin.jl")
 include("adversarial/fastLip.jl")
 include("adversarial/dlv.jl")
 export ReluVal, Neurify, AdaptNeurify, FastLin, FastLip, DLV
+
+include("runtime/trainingVerification.jl")
 
 const TOL = Ref(sqrt(eps()))
 set_tolerance(x::Real) = (TOL[] = x)
