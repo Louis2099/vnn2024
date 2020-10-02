@@ -1,18 +1,3 @@
-using NeuralVerification, LazySets, GLPKMathProgInterface
-using Test
-
-import NeuralVerification: ReLU, Id
-
-macro no_error(ex)
-    quote
-        try $(esc(ex))
-            true
-        catch e
-            @error(e)
-            false
-        end
-    end
-end
 
 @testset "ReLU Last Layer - Inactive" begin
 
@@ -33,7 +18,7 @@ end
         problem_holds    = Problem(small_nnet, in_hpoly, convert(HPolytope, out_superset))
         problem_violated = Problem(small_nnet, in_hpoly, convert(HPolytope, out_overlapping))
 
-        for solver in [MaxSens(resolution = 0.6), ExactReach(), Ai2()]
+        for solver in [MaxSens(resolution = 0.6), ExactReach(), Ai2(), Ai2h(), Box()]
             holds    = solve(solver, problem_holds)
             violated = solve(solver, problem_violated)
 

@@ -33,17 +33,26 @@ Sound but not complete.
 end
 
 function solve(solver::Sherlock, problem::Problem)
+    isbounded(problem.input) || UnboundedInputError("Temprarily, Sherlock cannot accept unbounded inputs")
+
     (x_u, u) = output_bound(solver, problem, :max)
     (x_l, l) = output_bound(solver, problem, :min)
     println("bounds: [", l, ", ", u, "]")
     bound = Hyperrectangle(low = [l], high = [u])
     reach = Hyperrectangle(low = [l - solver.ϵ], high = [u + solver.ϵ])
-    return interpret_result(reach, bound, problem.output, x_l, x_u) # This function is defined in bab.jl
+
+    output = problem.output
+    if reach ⊆ output
+        return ReachabilityResult(:holds, [reach])
+    end
+    high(bound) > high(output) && return CounterExampleResult(:violated, x_u)
+    low(bound)  < low(output)  && return CounterExampleResult(:violated, x_l)
+    return ReachabilityResult(:unknown, [reach])
 end
 
 function output_bound(solver::Sherlock, problem::Problem, type::Symbol)
     opt = solver.optimizer
-    x = sample(problem.input)
+    x = an_element(problem.input)
     while true
         (x, bound) = local_search(problem, x, opt, type)
         bound_ϵ = bound + ifelse(type == :max, solver.ϵ, -solver.ϵ)
@@ -53,25 +62,26 @@ function output_bound(solver::Sherlock, problem::Problem, type::Symbol)
     end
 end
 
-# Choose the first vertex
-function sample(set::AbstractPolytope)
-    x = vertices_list(set)
-    return x[1]
-end
 
 function local_search(problem::Problem, x::Vector{Float64}, optimizer, type::Symbol)
     nnet = problem.network
-    act_pattern = get_activation(nnet, x)
-    gradient = get_gradient(nnet, x)
+
     model = Model(optimizer)
-    neurons = init_neurons(model, nnet)
-    add_set_constraint!(model, problem.input, first(neurons))
-    encode_network!(model, nnet, neurons, act_pattern, StandardLP())
-    o = gradient * neurons[1]
+    model[:δ] = get_activation(nnet, x)
+    z = init_vars(model, nnet, :z, with_input=true)
+    add_set_constraint!(model, problem.input, first(z))
+    encode_network!(model, nnet, StandardLP())
+
+    # the gradient wrt to the input is a `1xn` matrix,
+    # because the output is 1-d. Therefore o[1] is the
+    # only entry in g*z₀
+    gradient = get_gradient(nnet, x)
+    o = gradient * first(z)
     index = ifelse(type == :max, 1, -1)
     @objective(model, Max, index * o[1])
     optimize!(model)
-    x_new = value(neurons[1])
+
+    x_new = value(first(z))
     bound_new = compute_output(nnet, x_new)
     return (x_new, bound_new[1])
 end

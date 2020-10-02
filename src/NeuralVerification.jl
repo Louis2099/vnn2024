@@ -20,7 +20,12 @@ abstract type Solver end
 # For optimization methods:
 import JuMP.MOI.OPTIMAL, JuMP.MOI.INFEASIBLE
 JuMP.Model(solver::Solver) = Model(solver.optimizer)
-JuMP.value(vars::Vector{VariableRef}) = value.(vars)
+# define a `value` function that recurses so that value(vector) and
+# value(VecOfVec) works cleanly. This is only so the code looks nice.
+value(var::JuMP.AbstractJuMPScalar) = JuMP.value(var)
+value(vars::Vector) = value.(vars)
+value(val) = val
+
 
 include("utils/activation.jl")
 include("utils/network.jl")
@@ -76,7 +81,7 @@ include("reachability/utils/reachability.jl")
 include("reachability/exactReach.jl")
 include("reachability/maxSens.jl")
 include("reachability/ai2.jl")
-export ExactReach, MaxSens, Ai2
+export ExactReach, MaxSens, Ai2, Ai2h, Ai2z, Box
 
 include("satisfiability/bab.jl")
 include("satisfiability/sherlock.jl")

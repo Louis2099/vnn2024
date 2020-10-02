@@ -34,8 +34,8 @@ function solve(solver::Duality, problem::Problem)
     @assert length(d) == 1 "Duality only accepts HalfSpace output sets. Got a $(length(d))-d polytope."
     d = d[1]
 
-    λ = init_multipliers(model, problem.network, "λ")
-    μ = init_multipliers(model, problem.network, "μ")
+    λ = init_vars(model, problem.network, :λ)
+    μ = init_vars(model, problem.network, :μ)
     o = dual_value(solver, problem, model, λ, μ)
     @constraint(model, last(λ) .== -c)
     optimize!(model)
@@ -86,6 +86,12 @@ function activation_value(σ::ReLU, μᵢ, λᵢ, l̂ᵢ, ûᵢ)
     gᵢûᵢ = @. μᵢ*ûᵢ - λᵢ*σ(ûᵢ)
 
     max = symbolic_max
+
+    # NOTE: ifelse evaluates all of its arguments in advance.
+    # This may seem like a bug since symbolic_max mutates the model
+    # and introduces new variables, but it is fine. Only those
+    # variables that are part of the objective will affect the problem,
+    # and those will only the the ones summed *after* taking the ifelse
     return sum(@. ifelse(l̂ᵢ < 0 < ûᵢ,
                          max(gᵢl̂ᵢ, gᵢûᵢ, 0),
                          max(gᵢl̂ᵢ, gᵢûᵢ)))

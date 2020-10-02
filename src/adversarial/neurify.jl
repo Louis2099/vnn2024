@@ -35,7 +35,7 @@ Sound but not complete.
 end
 
 
-function solve(solver::Neurify, problem::Problem, splits_order)
+function solve(solver::Neurify, problem::Problem)
     isbounded(problem.input) || throw(UnboundedInputError("Neurify can only handle bounded input sets."))
 
     # Because of over-approximation, a split may not bisect the input set.
@@ -48,36 +48,26 @@ function solve(solver::Neurify, problem::Problem, splits_order)
     reach_list = []
     domain = init_symbolic_grad(problem.input)
     splits = Set()
-    max_max_vio = -1e9
-    final_result = CounterExampleResult(:holds)
     for i in 1:solver.max_iter
         if i > 1
             domain, splits = select!(reach_list, solver.tree_search)
         end
 
         reach = forward_network(solver, nnet, domain)
-        result, max_violation_con, max_violation = check_inclusion(solver, nnet, last(reach).sym, output)
+        result, max_violation_con = check_inclusion(solver, nnet, last(reach).sym, output)
 
         if result.status === :violated
-            final_result = result
-        end
-        
-        k = length(splits)
-        if k < length(splits_order)
-            subdomains = constraint_refinement(nnet, reach, max_violation_con, splits, splits_order[k+1])
+            return result
+        elseif result.status === :unknown
+            subdomains = constraint_refinement(nnet, reach, max_violation_con, splits)
             for domain in subdomains
                 push!(reach_list, (init_symbolic_grad(domain), copy(splits)))
             end
-        else
-            println(splits, " ", max_violation)
-            max_max_vio = max(max_max_vio, max_violation)
-            if final_result.status === :holds
-                final_result = result
-            end
+
         end
-        isempty(reach_list) && break
+        isempty(reach_list) && return CounterExampleResult(:holds)
     end
-    return final_result, max_max_vio
+    return CounterExampleResult(:unknown)
 end
 
 function check_inclusion(solver::Neurify, nnet::Network,
@@ -92,7 +82,7 @@ function check_inclusion(solver::Neurify, nnet::Network,
     x = @variable(model, [1:dim(input_domain)])
     add_set_constraint!(model, input_domain, x)
 
-    max_violation = -1e9
+    max_violation = 0.0
     max_violation_con = nothing
     for (i, cons) in enumerate(constraints_list(output))
         # NOTE can be taken out of the loop, but maybe there's no advantage
@@ -104,16 +94,14 @@ function check_inclusion(solver::Neurify, nnet::Network,
         optimize!(model)
 
         if termination_status(model) == OPTIMAL
+            if compute_output(nnet, value(x)) ∉ output
+                return CounterExampleResult(:violated, value(x)), nothing
+            end
 
             viol = objective_value(model)
-
             if viol > max_violation
                 max_violation = viol
                 max_violation_con = a
-            end
-
-            if compute_output(nnet, value(x)) ∉ output
-                return CounterExampleResult(:violated, value(x)), nothing, max_violation
             end
 
         else
@@ -124,21 +112,18 @@ function check_inclusion(solver::Neurify, nnet::Network,
     end
 
     if max_violation > 0.0
-        return CounterExampleResult(:unknown), max_violation_con, max_violation
+        return CounterExampleResult(:unknown), max_violation_con
     else
-        return CounterExampleResult(:holds), nothing, max_violation
+        return CounterExampleResult(:holds), nothing
     end
 end
 
 function constraint_refinement(nnet::Network,
                                reach::Vector{<:SymbolicIntervalGradient},
-                               max_violation_con, splits, given_split)
+                               max_violation_con::AbstractVector{Float64},
+                               splits)
 
-    # i, j, influence = get_max_nodewise_influence(nnet, reach, max_violation_con, splits)
-    i, j = given_split
-    influence = 0
-    push!(splits, (i, j, influence))
-
+    i, j, influence = get_max_nodewise_influence(nnet, reach, max_violation_con, splits)
     # We can generate three more constraints
     # Symbolic representation of node i j is Low[i][j,:] and Up[i][j,:]
     aL, bL = reach[i].sym.Low[j, 1:end-1], reach[i].sym.Low[j, end]
@@ -205,6 +190,8 @@ function get_max_nodewise_influence(nnet::Network,
 
     # NOTE can omit this line in the paper version
     (i_max == 0 || j_max == 0) && error("Can not find valid node to split")
+
+    push!(splits, (i_max, j_max, influence_max))
 
     return (i_max, j_max, influence_max)
 end
