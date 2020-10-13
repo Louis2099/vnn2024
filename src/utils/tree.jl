@@ -2,10 +2,10 @@ mutable struct Tree{T}
     data::Vector{T}
     parent::Vector{Int}
     children::Vector{Vector{Int}}
-    leaves::Set{Int}
+    leaves::OrderedSet{Int}
     size::Int
 end
-Tree(data) = Tree{typeof(data)}([data], [0], [Vector{Int}()], Set([1]), 1)
+Tree(data) = Tree{typeof(data)}([data], [0], [Vector{Int}()], OrderedSet([1]), 1)
 
 function add_child!(t::Tree, parent::Int, data)
     push!(t.data, data)
@@ -19,12 +19,27 @@ function add_child!(t::Tree, parent::Int, data)
     return x
 end
 
+# connect two nodes in the tree. The parent of x doesn't change. Only the parent node will no longer be a leaf
+function connect!(t::Tree, parent::Int, x::Int)
+    push!(t.children[parent], x)
+    in(parent, t.leaves) && pop!(t.leaves, parent)
+    return x
+end
+
 function delete_node!(t::Tree, x::Int)
     t.size -= calc_subtree_size(t, x)
     if x in t.leaves
         pop!(t.leaves, x)
     end
     filter!(e->e≠x, t.children[t.parent[x]])
+    length(t.children[t.parent[x]]) == 0 && push!(t.leaves, t.parent[x])
+    t.parent[x] = 0
+end
+
+function delete_all_children!(t::Tree, x::Int)
+    for c in t.children[x]
+        delete_node!(t, c)
+    end
 end
 
 function print_tree(t::Tree, x::Int = 1)

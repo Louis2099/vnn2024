@@ -15,6 +15,8 @@ import LazySets: dim, HalfSpace # necessary to avoid conflict with Polyhedra
 
 using Requires
 
+using OrderedCollections
+
 abstract type Solver end
 
 # For optimization methods:
