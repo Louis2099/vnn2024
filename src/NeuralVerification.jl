@@ -15,7 +15,7 @@ import LazySets: dim, HalfSpace # necessary to avoid conflict with Polyhedra
 
 using Requires
 
-using OrderedCollections
+using OrderedCollections, Plots
 
 abstract type Solver end
 
@@ -94,12 +94,14 @@ include("satisfiability/planet.jl")
 export Planet
 include("adversarial/neurify.jl")
 include("adversarial/reluVal.jl")
+include("adversarial/intervalNet.jl")
 include("adversarial/adaptNeurify.jl")
 include("adversarial/fastLin.jl")
 include("adversarial/fastLip.jl")
 include("adversarial/dlv.jl")
-export ReluVal, Neurify, AdaptNeurify, FastLin, FastLip, DLV
+export ReluVal, Neurify, IntervalNet, AdaptNeurify, FastLin, FastLip, DLV
 
+include("runtime/branch_management.jl")
 include("runtime/trainingVerification.jl")
 
 const TOL = Ref(sqrt(eps()))

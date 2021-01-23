@@ -32,10 +32,12 @@ Sound but not complete.
     max_iter::Int64     = 100
     tree_search::Symbol = :DFS
     optimizer = GLPK.Optimizer
+    delta::Tuple{Float64, Float64} =(0,0)
+    enlarge = 0
 end
 
 
-function solve(solver::IntervalNet, problem::Problem, delta=1e-3)
+function solve(solver::IntervalNet, problem::Problem)
     isbounded(problem.input) || throw(UnboundedInputError("IntervalNet can only handle bounded input sets."))
 
     # Because of over-approximation, a split may not bisect the input set.
@@ -118,105 +120,33 @@ function check_inclusion(solver::IntervalNet, nnet::Network,
     end
 end
 
-function constraint_refinement(nnet::Network,
-                               reach::Vector{<:SymbolicIntervalGradient},
-                               max_violation_con::AbstractVector{Float64},
-                               splits)
 
-    i, j, influence = get_max_nodewise_influence(nnet, reach, max_violation_con, splits)
-    # We can generate three more constraints
-    # Symbolic representation of node i j is Low[i][j,:] and Up[i][j,:]
-    aL, bL = reach[i].sym.Low[j, 1:end-1], reach[i].sym.Low[j, end]
-    aU, bU = reach[i].sym.Up[j, 1:end-1], reach[i].sym.Up[j, end]
-
-    # custom intersection function that doesn't do constraint pruning
-    ∩ = (set, lc) -> HPolytope([constraints_list(set); lc])
-
-    subsets = [domain(reach[1])] # all the reaches have the same domain, so we can pick [1]
-
-    # If either of the normal vectors is the 0-vector, we must skip it.
-    # It cannot be used to create a halfspace constraint.
-    # NOTE: how can this come about, and does it mean anything?
-    if !iszero(aL)
-        subsets = subsets .∩ [HalfSpace(aL, -bL), HalfSpace(aL, -bL), HalfSpace(-aL, bL)]
-    end
-    if !iszero(aU)
-        subsets = subsets .∩ [HalfSpace(aU, -bU), HalfSpace(-aU, bU), HalfSpace(-aU, bU)]
-    end
-    return filter(!isempty, subsets)
+function forward_network(solver::IntervalNet, network::Network, input)
+    forward_network(solver, network, init_symbolic_grad(input))
 end
 
-
-function get_max_nodewise_influence(nnet::Network,
-                                    reach::Vector{<:SymbolicIntervalGradient},
-                                    max_violation_con::AbstractVector{Float64},
-                                    splits)
-
-    LΛ, UΛ = reach[end].LΛ, reach[end].UΛ
-    is_ambiguous_activation(i, j) = (0 < LΛ[i][j] < 1) || (0 < UΛ[i][j] < 1)
-
-    # We want to find the node with the largest influence
-    # Influence is defined as gradient * interval width
-    # The gradient is with respect to a loss defined by the most violated constraint.
-    LG = UG = max_violation_con
-    i_max, j_max, influence_max = 0, 0, -Inf
-
-    # Backpropagation to calculate the node-wise gradient
-    for i in reverse(1:length(nnet.layers))
-        layer = nnet.layers[i]
-        sym = reach[i].sym
-        if layer.activation isa ReLU
-            for j in 1:n_nodes(layer)
-                if is_ambiguous_activation(i, j)
-                    # taking `influence = max_gradient * reach.r[i][j]*k` would be
-                    # different from original paper, but can improve the split efficiency.
-                    # where `k = n-i+1`, i.e. counts up from 1 as you go back in layers.
-
-                    # radius wrt to the jth node/hidden dimension
-                    r = radius(sym, j)
-                    influence = max(abs(LG[j]), abs(UG[j])) * r
-                    if influence >= influence_max && (i, j, influence) ∉ splits
-                        i_max, j_max, influence_max = i, j, influence
-                    end
-                end
-            end
-        end
-
-        LG_hat = max.(LG, 0.0) .* LΛ[i] .+ min.(LG, 0.0) .* UΛ[i]
-        UG_hat = min.(UG, 0.0) .* LΛ[i] .+ max.(UG, 0.0) .* UΛ[i]
-
-        LG, UG = interval_map(layer.weights', LG_hat, UG_hat)
-    end
-
-    # NOTE can omit this line in the paper version
-    (i_max == 0 || j_max == 0) && error("Can not find valid node to split")
-
-    push!(splits, (i_max, j_max, influence_max))
-
-    return (i_max, j_max, influence_max)
-end
-
-
-
-function forward_network(solver::IntervalNet, network::Network, input, delta)
-    forward_network(solver, network, init_symbolic_grad(input), delta)
-end
-function forward_network(solver::IntervalNet, network::Network, input::SymbolicIntervalGradient, delta)
-    reachable = [input = forward_layer(solver, L, input, delta) for L in network.layers]
+function forward_network(solver::IntervalNet, network::Network, input::SymbolicIntervalGradient)
+    reachable = [input = forward_layer(solver, L, input) for L in network.layers]
     return reachable
 end
 
-function forward_layer(solver::IntervalNet, layer::Layer, input, delta)
-    return forward_act(solver, forward_linear(solver, input, layer, delta), layer)
+function forward_layer(solver::IntervalNet, layer::Layer, input)
+    return forward_act(solver, forward_linear(solver, input, layer), layer)
 end
 
 # Symbolic forward_linear
-function forward_linear(solver::IntervalNet, input::SymbolicIntervalGradient, layer::Layer, delta)
-    output_Low, output_Up = interval_map(layer.weights, input.sym.Low, input.sym.Up)
-    output_Up[:, end] += layer.bias
-    output_Low[:, end] += layer.bias
+function forward_linear(solver::IntervalNet, input::SymbolicIntervalGradient, layer::Layer)
+    output_Low, output_Up = interval_map(layer.weights, input.sym.Low, input.sym.Up, solver.delta[1])
+    output_Up[:, end] += layer.bias .+ solver.delta[2]
+    output_Low[:, end] += layer.bias .- solver.delta[2]
     sym = SymbolicInterval(output_Low, output_Up, domain(input))
     return SymbolicIntervalGradient(sym, input.LΛ, input.UΛ)
+end
+
+function interval_map(W::AbstractMatrix{N}, l::AbstractVecOrMat, u::AbstractVecOrMat, dW) where N
+    l_new = max.(W .+ dW, zero(N)) * l + min.(W .- dW, zero(N)) * u
+    u_new = max.(W .+ dW, zero(N)) * u + min.(W .- dW, zero(N)) * l
+    return (l_new, u_new)
 end
 
 # Symbolic forward_act

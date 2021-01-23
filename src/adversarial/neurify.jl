@@ -150,7 +150,7 @@ end
 function get_max_nodewise_influence(nnet::Network,
                                     reach::Vector{<:SymbolicIntervalGradient},
                                     max_violation_con::AbstractVector{Float64},
-                                    splits)
+                                    splits, push_splits=true)
 
     LΛ, UΛ = reach[end].LΛ, reach[end].UΛ
     is_ambiguous_activation(i, j) = (0 < LΛ[i][j] < 1) || (0 < UΛ[i][j] < 1)
@@ -191,7 +191,7 @@ function get_max_nodewise_influence(nnet::Network,
     # NOTE can omit this line in the paper version
     (i_max == 0 || j_max == 0) && error("Can not find valid node to split")
 
-    push!(splits, (i_max, j_max, influence_max))
+    push_splits && push!(splits, (i_max, j_max, influence_max))
 
     return (i_max, j_max, influence_max)
 end

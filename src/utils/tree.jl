@@ -44,6 +44,15 @@ end
 
 function print_tree(t::Tree, x::Int = 1)
     for c in t.children[x]
+        println(x, "->", c)
+    end
+    for c in t.children[x]
+        print_tree(t, c)
+    end
+end
+
+function print_tree_data(t::Tree, x::Int = 1)
+    for c in t.children[x]
         println(t.data[x], "->", t.data[c])
     end
     for c in t.children[x]
