@@ -3,7 +3,7 @@ function constraint_refinement(nnet::Network,
     max_violation_con,
     splits,
     splits_order)
-    if splits_order === nothing
+    if isnothing(splits_order)
         i, j, influence = get_max_nodewise_influence(nnet, reach, max_violation_con, splits, false)
     else
         i,j = splits_order
@@ -47,7 +47,7 @@ function ordinal_split!(solver, problem, branches::Tree, x::Int, max_size::Int, 
     
     k = length(splits)
     
-    if splits_order === nothing
+    if isnothing(splits_order)
         subdomains, split_node = constraint_refinement(nnet, reach, max_violation_con, splits, nothing)
     else
         subdomains, split_node = constraint_refinement(nnet, reach, max_violation_con, splits, splits_order[k+1])
@@ -90,43 +90,137 @@ function generate_ordinal_splits_order(nnet, max_branches)
     end
     return splits_order
 end
-function init_split(solver, problem, max_branches, splits_order)
+function init_split_given_order(solver, problem, max_branches, splits_order, samples=nothing)
     # split sequantially
     branches = Tree((problem.input, Vector()))
-    # result = ordinal_split!(solver, problem, branches, 1, max_branches, splits_order)
-    # result = ordinal_split!(solver, problem, branches, 1, max_branches)
-    result = heuristic_split!(solver, problem, branches, 1, max_branches)
+    result = ordinal_split!(solver, problem, branches, 1, max_branches, splits_order) # split with given order
+    samples_branch = nothing
+    if !isnothing(samples)
+        samples_branch = []
+        # println("classify samples")
+        for (i,sample) in enumerate(samples)
+            for leaf in branches.leaves
+                if i == 1 && leaf < 10
+                    # println("==========")
+                    # println(sample, " ")
+                    # println(leaf, " ")
+                    # println(in(sample, branches.data[leaf]))
+                    # println(branches.data[leaf])
+                end
+                if in(sample, branches.data[leaf])
+                    push!(samples_branch, leaf)
+                    break
+                end
+            end
+        end
+    end
+    return result, branches, samples_branch
+end
+
+function init_split_heuristic(solver, problem, max_branches)
+    # split heuristically
+    branches = Tree((problem.input, Vector()))
+    result = ordinal_split!(solver, problem, branches, 1, max_branches) # split heuristically by influence analysis
     return result, branches
 end
 
-function check_node(solver, problem, node)
+function check_node(solver, problem, node, last_layer_reach = nothing)
     (domain, splits) = node
-    reach = forward_network(solver, problem.network, domain)
+    if isnothing(last_layer_reach)
+        reach = forward_network(solver, problem.network, domain)
+    else
+        reach = [last_layer_reach, forward_layer(solver, problem.network.layers[end], last_layer_reach)]
+    end
     result, max_violation_con = check_inclusion(solver, problem.network, last(reach).sym, problem.output)
-    return result
+    return result, reach
 end
 
-function check_all_leaves(solver, problem, branches)
-    final_result = BasicResult(:holds)
+function check_all_leaves(solver, problem, branches, incremental_computation=false, forward_result_dict=nothing)
     result_dict = Dict()
-    for leaf in branches.leaves
-        # println(branches.data[leaf][2])
-        result = check_node(solver, problem, branches.data[leaf])
-        result_dict[leaf] = result
+    if incremental_computation && !isnothing(forward_result_dict)
+        for leaf in branches.leaves
+            result_dict[leaf], reach = check_node(solver, problem, branches.data[leaf], forward_result_dict[leaf])
+            forward_result_dict[leaf] = reach[end-1]
+        end
+    else
+        forward_result_dict = Dict()
+        for leaf in branches.leaves
+            result_dict[leaf], reach = check_node(solver, problem, branches.data[leaf])
+            forward_result_dict[leaf] = reach[end-1]
+        end
     end
     
     hold_cnt = count(x->x[2].status==:holds,result_dict)
     unkn_cnt = count(x->x[2].status==:unknown,result_dict)
     viol_cnt = count(x->x[2].status==:violated,result_dict)
     
-    # println(":holds ", hold_cnt)
-    # println(":unknown ", unkn_cnt)
-    # println(":violated ", viol_cnt)
+    violated_idx = [k for (k,v) in result_dict if v.status==:violated]
+
+    length(violated_idx) > 0 && return result_dict[violated_idx[1]], result_dict, (hold_cnt, unkn_cnt, viol_cnt), forward_result_dict
+    count(x->x[2].status==:unknown,result_dict) > 0 && return BasicResult(:unknown), result_dict, (hold_cnt, unkn_cnt, viol_cnt), forward_result_dict
+    return BasicResult(:holds), result_dict, (hold_cnt, unkn_cnt, viol_cnt), forward_result_dict
+end
+
+
+function check_all_leaves_demand_shifting(solver, problem, branches, incremental_computation=false, prev_out_reach=nothing)
+    result_dict = Dict()
+    if incremental_computation && !isnothing(prev_out_reach)
+        for leaf in branches.leaves
+            result_dict[leaf], max_violation_con = check_inclusion(solver, problem.network, prev_out_reach[leaf].sym, problem.output)
+        end
+    else
+        prev_out_reach = Dict()
+        for leaf in branches.leaves
+            result_dict[leaf], reach = check_node(solver, problem, branches.data[leaf])
+            prev_out_reach[leaf] = reach[end]
+        end
+    end
+    
+    hold_cnt = count(x->x[2].status==:holds,result_dict)
+    unkn_cnt = count(x->x[2].status==:unknown,result_dict)
+    viol_cnt = count(x->x[2].status==:violated,result_dict)
     
     violated_idx = [k for (k,v) in result_dict if v.status==:violated]
-    length(violated_idx) > 0 && return result_dict[violated_idx[1]], result_dict, (hold_cnt, unkn_cnt, viol_cnt)
-    count(x->x[2].status==:unknown,result_dict) > 0 && return BasicResult(:unknown), result_dict, (hold_cnt, unkn_cnt, viol_cnt)
-    return BasicResult(:holds), result_dict, (hold_cnt, unkn_cnt, viol_cnt)
+
+    length(violated_idx) > 0 && return result_dict[violated_idx[1]], result_dict, (hold_cnt, unkn_cnt, viol_cnt), prev_out_reach
+    count(x->x[2].status==:unknown,result_dict) > 0 && return BasicResult(:unknown), result_dict, (hold_cnt, unkn_cnt, viol_cnt), prev_out_reach
+    return BasicResult(:holds), result_dict, (hold_cnt, unkn_cnt, viol_cnt), prev_out_reach
+end
+
+
+function enlarge_domain(domain, reachable_set_relaxation)
+    for (i,con) in enumerate(domain.constraints)
+        domain.constraints[i] = HalfSpace(con.a, con.b + reachable_set_relaxation)
+    end
+    return domain
+end
+
+
+function check_all_leaves_domain_shifting(solver, problem, branches, reachable_set_relaxation=0, enlarged_inputs=nothing, prev_results=nothing)
+    result_dict = Dict()
+    isnothing(enlarged_inputs) && (enlarged_inputs = Dict())
+
+    for leaf in branches.leaves
+        (domain, splits) =  branches.data[leaf]
+        if reachable_set_relaxation > 0 && haskey(enlarged_inputs, leaf)
+            if issubset(domain, enlarged_inputs[leaf])
+                result_dict[leaf] = prev_results[leaf]
+                continue
+            end
+        end
+        enlarged_inputs[leaf] = enlarge_domain(domain, reachable_set_relaxation)
+        result_dict[leaf], reach = check_node(solver, problem, branches.data[leaf])
+    end
+
+    hold_cnt = count(x->x[2].status==:holds,result_dict)
+    unkn_cnt = count(x->x[2].status==:unknown,result_dict)
+    viol_cnt = count(x->x[2].status==:violated,result_dict)
+    
+    violated_idx = [k for (k,v) in result_dict if v.status==:violated]
+
+    length(violated_idx) > 0 && return result_dict[violated_idx[1]], result_dict, (hold_cnt, unkn_cnt, viol_cnt), enlarged_inputs
+    count(x->x[2].status==:unknown,result_dict) > 0 && return BasicResult(:unknown), result_dict, (hold_cnt, unkn_cnt, viol_cnt), enlarged_inputs
+    return BasicResult(:holds), result_dict, (hold_cnt, unkn_cnt, viol_cnt), enlarged_inputs
 end
 
 function split_given_path(solver, problem, split_path)
@@ -145,7 +239,7 @@ function split_given_path(solver, problem, split_path)
         push!(splits, (node, 0)) # set idx=0, because this split_path may not be part of any tree path
         subdomains, split_node = constraint_refinement(nnet, reach, max_violation_con, splits, node)
         domain = subdomains[sgn]
-        if domain === nothing
+        if isnothing(domain)
             return BasicResult(:holds, )
         end 
     end
@@ -243,7 +337,7 @@ function merge_holds_nodes!(solver, problem, branches, result_dict)
         if holds_cnt[branches.parent[leaf]] == 3
             # println("try to merge")
             try_cnt += 1
-            result = check_node(solver, problem, branches.data[branches.parent[leaf]])
+            result, last_reach = check_node(solver, problem, branches.data[branches.parent[leaf]])
             # result = BasicResult(:holds) # to test split
             (result.status == :holds) || continue
             # println("merge success")
@@ -261,4 +355,85 @@ function merge_holds_nodes!(solver, problem, branches, result_dict)
     end
     # println("try merge: ", try_cnt)
     # println("success:   ", suc_cnt)
+end
+
+
+
+function calc_length(branches, result_dict)
+    (inputset, splits) = branches.data[1]
+    # p = plot(inputset, color="blue")
+    hold_area = 0
+    for leaf in branches.leaves
+        # println(leaf)
+        if result_dict[leaf].status == :holds
+            (domain, splits) = branches.data[leaf]
+            isempty(domain) && continue
+            println("domain")
+            println(domain)
+            println(isempty(domain))
+            println(LazySets.diameter(domain))
+            hold_area += LazySets.diameter(domain)
+            if LazySets.diameter(domain) < 1e-6
+                continue
+            end
+            # plot!(p, domain, color="green", alpha=0.8)
+        end
+
+        if result_dict[leaf].status == :unknown
+            (domain, splits) = branches.data[leaf]
+            if LazySets.diameter(domain) < 1e-6
+                continue
+            end
+            # plot!(p, domain, color="orange", alpha=0.8)
+        end
+    end 
+    return hold_area / area(inputset)
+end
+
+
+function calc_area(branches, result_dict)
+    (inputset, splits) = branches.data[1]
+    # p = plot(inputset, color="blue")
+    hold_area = 0
+    for leaf in branches.leaves
+        # println(leaf)
+        if result_dict[leaf].status == :holds
+            (domain, splits) = branches.data[leaf]
+            # println("domain")
+            # println(domain)
+            hold_area += area(domain)
+            if area(domain) < 1e-6
+                continue
+            end
+            # plot!(p, domain, color="green", alpha=0.8)
+        end
+
+        if result_dict[leaf].status == :unknown
+            (domain, splits) = branches.data[leaf]
+            if area(domain) < 1e-6
+                continue
+            end
+            # plot!(p, domain, color="orange", alpha=0.8)
+        end
+    end 
+    # display(p)
+    # println("hold area ratio:", )
+    return hold_area / area(inputset)
+end
+
+function calc_sampling_coverage(branches, result_dict, samples_branch)
+    println(samples_branch)
+    println(result_dict)
+    hold_cnt = sum([result_dict[x].status == :holds for x in samples_branch])
+    return hold_cnt*1.0/length(samples_branch)
+end
+
+function compute_coverage(branches, result_dict, input_dim, samples_branch)
+    if input_dim == 1
+        return calc_length(branches, result_dict)
+    elseif input_dim == 2
+        return calc_area(branches, result_dict)
+    else
+        return calc_sampling_coverage(branches, result_dict, samples_branch)
+    end
 end

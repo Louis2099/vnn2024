@@ -57,6 +57,23 @@ struct TrainingProblem{P, Q}
     output::Q
 end
 
+struct AdaptingProblem{P, Q}
+    networks::Array
+    input::P
+    output::Q
+end
+
+struct DomainShiftingProblem{P, Q}
+    network::Network
+    inputs::Array{P}
+    output::Q
+end
+
+struct DemandShiftingProblem{P, Q}
+    network::Network
+    input::P
+    outputs::Array{Q}
+end
 
 """
     Result

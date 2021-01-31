@@ -53,6 +53,9 @@ export
     PiecewiseLinear,
     Problem,
     TrainingProblem,
+    AdaptingProblem,
+    DomainShiftingProblem,
+    DemandShiftingProblem,
     Result,
     BasicResult,
     CounterExampleResult,
@@ -102,7 +105,10 @@ include("adversarial/dlv.jl")
 export ReluVal, Neurify, IntervalNet, AdaptNeurify, FastLin, FastLip, DLV
 
 include("runtime/branch_management.jl")
+include("runtime/domainShiftingVerification.jl")
 include("runtime/trainingVerification.jl")
+include("runtime/adaptingVerification.jl")
+include("runtime/demandShiftingVerification.jl")
 
 const TOL = Ref(sqrt(eps()))
 set_tolerance(x::Real) = (TOL[] = x)
