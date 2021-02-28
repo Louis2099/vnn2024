@@ -84,7 +84,7 @@ function check_inclusion(solver::IntervalNet, nnet::Network,
     x = @variable(model, [1:dim(input_domain)])
     add_set_constraint!(model, input_domain, x)
 
-    max_violation = 0.0
+    max_violation = -Inf
     max_violation_con = nothing
     for (i, cons) in enumerate(constraints_list(output))
         # NOTE can be taken out of the loop, but maybe there's no advantage
@@ -114,9 +114,9 @@ function check_inclusion(solver::IntervalNet, nnet::Network,
     end
 
     if max_violation > 0.0
-        return CounterExampleResult(:unknown), max_violation_con
+        return RuntimeResult(:unknown, max_violation), max_violation_con
     else
-        return CounterExampleResult(:holds), nothing
+        return RuntimeResult(:holds, max_violation), max_violation_con
     end
 end
 

@@ -15,7 +15,12 @@ import LazySets: dim, HalfSpace # necessary to avoid conflict with Polyhedra
 
 using Requires
 
+# Runtime verification dependencies
 using OrderedCollections, Plots
+using ProgressMeter
+using SparseArrays
+using MosekTools
+using Combinatorics
 
 abstract type Solver end
 
@@ -65,7 +70,8 @@ export
     write_nnet,
     solve,
     forward_network,
-    check_inclusion
+    check_inclusion,
+    find_lipschitz
 
 solve(m::Model; kwargs...) = JuMP.solve(m; kwargs...)
 export solve
@@ -97,18 +103,20 @@ include("satisfiability/planet.jl")
 export Planet
 include("adversarial/neurify.jl")
 include("adversarial/reluVal.jl")
-include("adversarial/intervalNet.jl")
 include("adversarial/adaptNeurify.jl")
 include("adversarial/fastLin.jl")
 include("adversarial/fastLip.jl")
 include("adversarial/dlv.jl")
-export ReluVal, Neurify, IntervalNet, AdaptNeurify, FastLin, FastLip, DLV
+export ReluVal, Neurify, AdaptNeurify, FastLin, FastLip, DLV
 
+include("runtime/intervalNet.jl")
 include("runtime/branch_management.jl")
+include("runtime/find_lipschitz.jl")
 include("runtime/domainShiftingVerification.jl")
 include("runtime/trainingVerification.jl")
 include("runtime/adaptingVerification.jl")
 include("runtime/demandShiftingVerification.jl")
+export find_lipschitz, IntervalNet
 
 const TOL = Ref(sqrt(eps()))
 set_tolerance(x::Real) = (TOL[] = x)

@@ -137,6 +137,18 @@ struct ReachabilityResult <: Result
     ReachabilityResult(s, r) = new(validate_status(s), r)
 end
 
+
+"""
+    RuntimeResult(status, max_violation)
+
+Like `BasicResult`, but also returns the maximum violation in the output constraints (if status = :holds, then max_violation < 0).
+"""
+struct RuntimeResult <: Result
+	status::Symbol
+	max_violation::Float64
+    RuntimeResult(s, md) = new(validate_status(s), md)
+end
+
 # Additional constructors:
 CounterExampleResult(s) = CounterExampleResult(s, Float64[])
 AdversarialResult(s)    = AdversarialResult(s, -1.0)

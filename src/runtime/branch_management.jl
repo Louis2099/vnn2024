@@ -1,4 +1,4 @@
-function constraint_refinement(nnet::Network,
+function split_by_node(nnet::Network,
     reach::Vector{<:SymbolicIntervalGradient},
     max_violation_con,
     splits,
@@ -16,7 +16,7 @@ function constraint_refinement(nnet::Network,
     # custom intersection function that doesn't do constraint pruning
     ∩ = (set, lc) -> HPolytope([constraints_list(set); lc])
     
-    subsets = Union{Nothing, HPolytope}[domain(reach[1])] # all the reaches have the same domain, so we can pick [1]
+    subsets = Union{Nothing, HPolytope}[domain(reach[1])] # reach is the list of reachable set of each layer of the network.
     
     # If either of the normal vectors is the 0-vector, we must skip it.
     # It cannot be used to create a halfspace constraint.
@@ -32,7 +32,27 @@ function constraint_refinement(nnet::Network,
     return subsets, (i, j)
 end
 
-function ordinal_split!(solver, problem, branches::Tree, x::Int, max_size::Int, splits_order = nothing)
+function split_by_dimension(reach::Vector{<:SymbolicIntervalGradient})
+    
+    original_domain = domain(reach[1])
+    B = box_approximation(original_domain)
+    dim_sizes = [(high(B, i) - low(B, i)) for i in 1:dim(B)]
+    (max_len, max_dim) = findmax(dim_sizes)
+    
+    a = zeros(length(dim_sizes))
+    a[max_dim] = 1.0
+    b = (high(B, max_dim) + low(B,max_dim)) / 2.0
+    
+    # custom intersection function that doesn't do constraint pruning
+    ∩ = (set, lc) -> HPolytope([constraints_list(set); lc])
+    
+    subsets = Union{Nothing, HPolytope}[original_domain] # reach is the list of reachable set of each layer of the network.
+    subsets = subsets .∩ [HalfSpace(a, b), HalfSpace(-a, -b)]
+    
+    return subsets, (0, 0)
+end
+
+function ordinal_split!(solver, problem, branches::Tree, x::Int, max_size::Int, split_method=:split_by_node_heuristic, splits_order = nothing)
     (domain, splits) = branches.data[x]
     nnet, output = problem.network, problem.output
     reach = forward_network(solver, nnet, domain)
@@ -45,37 +65,32 @@ function ordinal_split!(solver, problem, branches::Tree, x::Int, max_size::Int, 
         return BasicResult(:unknown)
     end
     
-    k = length(splits)
-    
-    if isnothing(splits_order)
-        subdomains, split_node = constraint_refinement(nnet, reach, max_violation_con, splits, nothing)
+    if split_method == :split_by_dim
+        subdomains, split_node = split_by_dimension(reach)
     else
-        subdomains, split_node = constraint_refinement(nnet, reach, max_violation_con, splits, splits_order[k+1])
+        if isnothing(splits_order)
+            subdomains, split_node = split_by_node(nnet, reach, max_violation_con, splits, nothing)
+        else
+            k = length(splits)
+            subdomains, split_node = split_by_node(nnet, reach, max_violation_con, splits, splits_order[k+1])
+        end
     end
     
-    # println(branches.parent[x], " -> ", x)
-    # p = plot(branches.data[1][1], color="blue")
     for (idx, subdomain) in enumerate(subdomains)
         if isempty(subdomain)
             continue
         end
-        # if area(subdomain) < 1e-3
-        #     continue
-        # end
-        # p = plot!(p, subdomain, alpha=0.5)
         new_splits = copy(splits)
         push!(new_splits, (split_node, idx))
-        add_child!(branches, x, (subdomain, new_splits)) # we don't calculate the max_violation_con for now.
+        add_child!(branches, x, (subdomain, new_splits))
     end
-    # display(p)
     
     for c in branches.children[x]
-        result = ordinal_split!(solver, problem, branches, c, max_size, splits_order)
-        result.status == :holds || return result # if status == :unknown, means splitting number exceeds max_iter, return unkown directly.
+        result = ordinal_split!(solver, problem, branches, c, max_size, split_method, splits_order)
+        result.status == :holds || return result # status == :unknown means splitting number exceeds max_iter, return unkown directly.
     end
     return BasicResult(:holds)
 end
-
 
 function generate_ordinal_splits_order(nnet, max_branches)
     splits_order = Array{Tuple{Int64,Int64},1}(undef, max_branches)
@@ -90,24 +105,18 @@ function generate_ordinal_splits_order(nnet, max_branches)
     end
     return splits_order
 end
-function init_split_given_order(solver, problem, max_branches, splits_order, samples=nothing)
+
+function init_split(solver, problem, max_branches, split_method = :split_by_node_heuristic, splits_order=nothing, samples=nothing)
     # split sequantially
     branches = Tree((problem.input, Vector()))
-    result = ordinal_split!(solver, problem, branches, 1, max_branches, splits_order) # split with given order
+    result = ordinal_split!(solver, problem, branches, 1, max_branches, split_method, splits_order) # split by dimension
     samples_branch = nothing
     if !isnothing(samples)
         samples_branch = []
-        # println("classify samples")
         for (i,sample) in enumerate(samples)
             for leaf in branches.leaves
-                if i == 1 && leaf < 10
-                    # println("==========")
-                    # println(sample, " ")
-                    # println(leaf, " ")
-                    # println(in(sample, branches.data[leaf]))
-                    # println(branches.data[leaf])
-                end
-                if in(sample, branches.data[leaf])
+                (domain, splits) = branches.data[leaf]
+                if in(sample, domain)
                     push!(samples_branch, leaf)
                     break
                 end
@@ -117,15 +126,7 @@ function init_split_given_order(solver, problem, max_branches, splits_order, sam
     return result, branches, samples_branch
 end
 
-function init_split_heuristic(solver, problem, max_branches)
-    # split heuristically
-    branches = Tree((problem.input, Vector()))
-    result = ordinal_split!(solver, problem, branches, 1, max_branches) # split heuristically by influence analysis
-    return result, branches
-end
-
-function check_node(solver, problem, node, last_layer_reach = nothing)
-    (domain, splits) = node
+function check_node(solver, problem, domain, last_layer_reach = nothing)
     if isnothing(last_layer_reach)
         reach = forward_network(solver, problem.network, domain)
     else
@@ -139,13 +140,13 @@ function check_all_leaves(solver, problem, branches, incremental_computation=fal
     result_dict = Dict()
     if incremental_computation && !isnothing(forward_result_dict)
         for leaf in branches.leaves
-            result_dict[leaf], reach = check_node(solver, problem, branches.data[leaf], forward_result_dict[leaf])
+            result_dict[leaf], reach = check_node(solver, problem, branches.data[leaf][1], forward_result_dict[leaf])
             forward_result_dict[leaf] = reach[end-1]
         end
     else
         forward_result_dict = Dict()
         for leaf in branches.leaves
-            result_dict[leaf], reach = check_node(solver, problem, branches.data[leaf])
+            result_dict[leaf], reach = check_node(solver, problem, branches.data[leaf][1])
             forward_result_dict[leaf] = reach[end-1]
         end
     end
@@ -155,7 +156,7 @@ function check_all_leaves(solver, problem, branches, incremental_computation=fal
     viol_cnt = count(x->x[2].status==:violated,result_dict)
     
     violated_idx = [k for (k,v) in result_dict if v.status==:violated]
-
+    
     length(violated_idx) > 0 && return result_dict[violated_idx[1]], result_dict, (hold_cnt, unkn_cnt, viol_cnt), forward_result_dict
     count(x->x[2].status==:unknown,result_dict) > 0 && return BasicResult(:unknown), result_dict, (hold_cnt, unkn_cnt, viol_cnt), forward_result_dict
     return BasicResult(:holds), result_dict, (hold_cnt, unkn_cnt, viol_cnt), forward_result_dict
@@ -171,7 +172,7 @@ function check_all_leaves_demand_shifting(solver, problem, branches, incremental
     else
         prev_out_reach = Dict()
         for leaf in branches.leaves
-            result_dict[leaf], reach = check_node(solver, problem, branches.data[leaf])
+            result_dict[leaf], reach = check_node(solver, problem, branches.data[leaf][1])
             prev_out_reach[leaf] = reach[end]
         end
     end
@@ -181,7 +182,7 @@ function check_all_leaves_demand_shifting(solver, problem, branches, incremental
     viol_cnt = count(x->x[2].status==:violated,result_dict)
     
     violated_idx = [k for (k,v) in result_dict if v.status==:violated]
-
+    
     length(violated_idx) > 0 && return result_dict[violated_idx[1]], result_dict, (hold_cnt, unkn_cnt, viol_cnt), prev_out_reach
     count(x->x[2].status==:unknown,result_dict) > 0 && return BasicResult(:unknown), result_dict, (hold_cnt, unkn_cnt, viol_cnt), prev_out_reach
     return BasicResult(:holds), result_dict, (hold_cnt, unkn_cnt, viol_cnt), prev_out_reach
@@ -195,29 +196,64 @@ function enlarge_domain(domain, reachable_set_relaxation)
     return domain
 end
 
+function set_distance(A, B)
+    # find max distance between 2 sets.
+    # when max_dis < 0, means A is included in B
 
-function check_all_leaves_domain_shifting(solver, problem, branches, reachable_set_relaxation=0, enlarged_inputs=nothing, prev_results=nothing)
+    
+    model = Model(solver); set_silent(model)
+    x = @variable(model, [1:dim(A)])
+    add_set_constraint!(model, A, x)
+    
+    max_dis = -Inf
+    for (i, cons) in enumerate(constraints_list(B))
+        # NOTE can be taken out of the loop, but maybe there's no advantage
+        # NOTE max.(M, 0) * U  + ... is a common operation, and maybe should get a name. It's also an "interval map".
+        a, b = cons.a, cons.b
+        
+        @objective(model, Max, a * [x; 1] - b)
+        optimize!(model)
+
+        if termination_status(model) == OPTIMAL
+            if compute_output(nnet, value(x)) ∉ B
+                return CounterExampleResult(:violated, value(x)), nothing
+            end
+            dis = objective_value(model)
+            max_dis = max(max_dis, dis)
+        else
+            error("No solution, please check the problem definition.")
+        end
+    end
+    
+    return max_dis
+end
+
+function check_all_leaves_domain_shifting(solver, problem, branches, reachable_set_relaxation=0, enlarged_inputs=nothing, prev_results=nothing, lipschitz=nothing)
     result_dict = Dict()
     isnothing(enlarged_inputs) && (enlarged_inputs = Dict())
-
+    
     for leaf in branches.leaves
         (domain, splits) =  branches.data[leaf]
-        if reachable_set_relaxation > 0 && haskey(enlarged_inputs, leaf)
-            if issubset(domain, enlarged_inputs[leaf])
-                result_dict[leaf] = prev_results[leaf]
-                continue
+        if haskey(enlarged_inputs, leaf) && haskey(prev_results, leaf)
+            if reachable_set_relaxation > 0 || !isnothing(lipschitz)
+                max_dis = set_distance(domain, enlarged_inputs[leaf])
+                if max_dis < 0
+                    result_dict[leaf] = prev_results[leaf]
+                    continue
+                elseif max_dis < prev_results[leaf].max_violation
+                end
             end
         end
         enlarged_inputs[leaf] = enlarge_domain(domain, reachable_set_relaxation)
-        result_dict[leaf], reach = check_node(solver, problem, branches.data[leaf])
+        result_dict[leaf], reach = check_node(solver, problem, enlarged_inputs[leaf])
     end
-
+    
     hold_cnt = count(x->x[2].status==:holds,result_dict)
     unkn_cnt = count(x->x[2].status==:unknown,result_dict)
     viol_cnt = count(x->x[2].status==:violated,result_dict)
     
     violated_idx = [k for (k,v) in result_dict if v.status==:violated]
-
+    
     length(violated_idx) > 0 && return result_dict[violated_idx[1]], result_dict, (hold_cnt, unkn_cnt, viol_cnt), enlarged_inputs
     count(x->x[2].status==:unknown,result_dict) > 0 && return BasicResult(:unknown), result_dict, (hold_cnt, unkn_cnt, viol_cnt), enlarged_inputs
     return BasicResult(:holds), result_dict, (hold_cnt, unkn_cnt, viol_cnt), enlarged_inputs
@@ -237,7 +273,7 @@ function split_given_path(solver, problem, split_path)
         reach = forward_network(solver, nnet, domain)
         result, max_violation_con = check_inclusion(solver, nnet, last(reach).sym, output)
         push!(splits, (node, 0)) # set idx=0, because this split_path may not be part of any tree path
-        subdomains, split_node = constraint_refinement(nnet, reach, max_violation_con, splits, node)
+        subdomains, split_node = split_by_node(nnet, reach, max_violation_con, splits, node)
         domain = subdomains[sgn]
         if isnothing(domain)
             return BasicResult(:holds, )
@@ -250,75 +286,76 @@ function split_given_path(solver, problem, split_path)
     return result, (domain, splits)
 end
 
-function merge_holds_nodes_general!(solver, problem, branches, result_dict)
-    """
-    The split path is in the form:
-    ((i1,j1), sgn1), ((i2,j2), sgn2) ...
-    
-    (i,j) is the position of the split ReLU node in the network. 
-    sgn is the index of the subdomain we choose. 
-    In neurify, we split the domain into three subdomains. Therefore, the sign can be 1-3. 
-    
-    We denote
-    ((i,j), sgn): choice
-    (i,j):        node
-    sgn:          sign
-    
-    To merge paths, we must have 3 holding paths that are only different in one sign.
-    To find such paths. We define a dictionary pool.
-    
-    pool:   key:   split_path with a choice removed.
-    value: [(removed_choice1, path_idx1), (removed_choice2, path_idx2), ... ],
-    """
-    pool = Dict()
-    new_leaves = []
-    merged_path_idx = []
-    try_cnt = 0
-    suc_cnt = 0
-    leaves = copy(branches.leaves) # in case the branches.leaves changes in the loop
-    for (i, leaf_idx) in enumerate(leaves)
-        leaf = branches.data[leaf_idx]
-        result_dict[leaf_idx].status == :holds || continue
-        (domain, split_path) = leaf
-        # println(split_path)
-        for j in 1:length(split_path)
-            pruned_path = [split_path[1:j-1]; split_path[j+1:end]]  # remove a choice from the split path, then use the pruned path as the key.
-            if haskey(pool, pruned_path)  # check all paths that has the same pruned path
-                choice_idx = findall(x -> x[1][1]==split_path[j][1], pool[pruned_path])  # find choices that have the same node
-                if length(choice_idx) == 2 # find two nodes, that is, all sign of this node hold, possible to merge
-                    # println("find identical")
-                    # println("split_path")
-                    # println(split_path)
-                    # println("split_path[j]")
-                    # println(split_path[j])
-                    idx = [[x[2] for x in pool[pruned_path][choice_idx]]; leaf_idx]  # get all mergable leaf idx
-                    idx = filter(x->!(x in merged_path_idx), idx) # remove paths that are already merged
-                    length(idx) == 3 || continue 
-                    # println("idx (if consecutive, we are actually replacing three leaves with their parent)")
-                    println(idx)
-                    result, merged_node = split_given_path(solver, problem, pruned_path)
-                    # println("merge result")
-                    # println(result)
-                    try_cnt += 1
-                    result.status == :holds || continue
-                    suc_cnt += 1
-                    merged_path_idx = [merged_path_idx; idx]
-                    # println("merged_node")
-                    # println(merged_node)
-                    id = add_child!(branches, idx[1], merged_node)# remove idx[1] from leaves, set parent of the merged_node as idx[1]
-                    connect!(branches, idx[2], id)  # to remove idx[2] from leaves
-                    connect!(branches, idx[3], id)  # to remove idx[3] from leaves
-                end
-            else
-                pool[pruned_path] = []
-            end
-            push!(pool[pruned_path], (split_path[j], leaf_idx))  # store (removed_choice, leaf_idx) as the value.
-        end
-    end
-    println("try merge: ", try_cnt)
-    println("success:   ", suc_cnt)
-    return [filter(x->!(x in merged_path_idx), branches.leaves); new_leaves]
-end
+# This function is deprecated, because two paths only differ in a middle node are not mergeable.
+# function merge_holds_nodes_general!(solver, problem, branches, result_dict)
+#     """
+#     The split path is in the form:
+#     ((i1,j1), sgn1), ((i2,j2), sgn2) ...
+
+#     (i,j) is the position of the split ReLU node in the network. 
+#     sgn is the index of the subdomain we choose. 
+#     In neurify, we split the domain into three subdomains. Therefore, the sign can be 1-3. 
+
+#     We denote
+#     ((i,j), sgn): choice
+#     (i,j):        node
+#     sgn:          sign
+
+#     To merge paths, we must have 3 holding paths that are only different in one sign.
+#     To find such paths. We define a dictionary pool.
+
+#     pool:   key:   split_path with a choice removed.
+#     value: [(removed_choice1, path_idx1), (removed_choice2, path_idx2), ... ],
+#     """
+#     pool = Dict()
+#     new_leaves = []
+#     merged_path_idx = []
+#     try_cnt = 0
+#     suc_cnt = 0
+#     leaves = copy(branches.leaves) # in case the branches.leaves changes in the loop
+#     for (i, leaf_idx) in enumerate(leaves)
+#         leaf = branches.data[leaf_idx]
+#         result_dict[leaf_idx].status == :holds || continue
+#         (domain, split_path) = leaf
+#         # println(split_path)
+#         for j in 1:length(split_path)
+#             pruned_path = [split_path[1:j-1]; split_path[j+1:end]]  # remove a choice from the split path, then use the pruned path as the key.
+#             if haskey(pool, pruned_path)  # check all paths that has the same pruned path
+#                 choice_idx = findall(x -> x[1][1]==split_path[j][1], pool[pruned_path])  # find choices that have the same node
+#                 if length(choice_idx) == 2 # find two nodes, that is, all sign of this node hold, possible to merge
+#                     # println("find identical")
+#                     # println("split_path")
+#                     # println(split_path)
+#                     # println("split_path[j]")
+#                     # println(split_path[j])
+#                     idx = [[x[2] for x in pool[pruned_path][choice_idx]]; leaf_idx]  # get all mergable leaf idx
+#                     idx = filter(x->!(x in merged_path_idx), idx) # remove paths that are already merged
+#                     length(idx) == 3 || continue 
+#                     # println("idx (if consecutive, we are actually replacing three leaves with their parent)")
+#                     println(idx)
+#                     result, merged_node = split_given_path(solver, problem, pruned_path)
+#                     # println("merge result")
+#                     # println(result)
+#                     try_cnt += 1
+#                     result.status == :holds || continue
+#                     suc_cnt += 1
+#                     merged_path_idx = [merged_path_idx; idx]
+#                     # println("merged_node")
+#                     # println(merged_node)
+#                     id = add_child!(branches, idx[1], merged_node)# remove idx[1] from leaves, set parent of the merged_node as idx[1]
+#                     connect!(branches, idx[2], id)  # to remove idx[2] from leaves
+#                     connect!(branches, idx[3], id)  # to remove idx[3] from leaves
+#                 end
+#             else
+#                 pool[pruned_path] = []
+#             end
+#             push!(pool[pruned_path], (split_path[j], leaf_idx))  # store (removed_choice, leaf_idx) as the value.
+#         end
+#     end
+#     println("try merge: ", try_cnt)
+#     println("success:   ", suc_cnt)
+#     return [filter(x->!(x in merged_path_idx), branches.leaves); new_leaves]
+# end
 
 function merge_holds_nodes!(solver, problem, branches, result_dict)
     """
@@ -334,10 +371,10 @@ function merge_holds_nodes!(solver, problem, branches, result_dict)
         result_dict[leaf].status == :holds || continue
         # println(leaf, ' ', branches.parent[leaf])
         holds_cnt[branches.parent[leaf]] += 1
-        if holds_cnt[branches.parent[leaf]] == 3
+        if holds_cnt[branches.parent[leaf]] == length(branches.children[branches.parent[leaf]])
             # println("try to merge")
             try_cnt += 1
-            result, last_reach = check_node(solver, problem, branches.data[branches.parent[leaf]])
+            result, last_reach = check_node(solver, problem, branches.data[branches.parent[leaf]][1])
             # result = BasicResult(:holds) # to test split
             (result.status == :holds) || continue
             # println("merge success")
@@ -378,7 +415,7 @@ function calc_length(branches, result_dict)
             end
             # plot!(p, domain, color="green", alpha=0.8)
         end
-
+        
         if result_dict[leaf].status == :unknown
             (domain, splits) = branches.data[leaf]
             if LazySets.diameter(domain) < 1e-6
@@ -407,7 +444,7 @@ function calc_area(branches, result_dict)
             end
             # plot!(p, domain, color="green", alpha=0.8)
         end
-
+        
         if result_dict[leaf].status == :unknown
             (domain, splits) = branches.data[leaf]
             if area(domain) < 1e-6
@@ -422,13 +459,16 @@ function calc_area(branches, result_dict)
 end
 
 function calc_sampling_coverage(branches, result_dict, samples_branch)
-    println(samples_branch)
-    println(result_dict)
+    # println("samples_branch")
+    # println(samples_branch)
+    # println(result_dict)
     hold_cnt = sum([result_dict[x].status == :holds for x in samples_branch])
     return hold_cnt*1.0/length(samples_branch)
 end
 
 function compute_coverage(branches, result_dict, input_dim, samples_branch)
+    isnothing(samples_branch) && return 0
+    
     if input_dim == 1
         return calc_length(branches, result_dict)
     elseif input_dim == 2

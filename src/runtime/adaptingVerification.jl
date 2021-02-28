@@ -1,9 +1,9 @@
-function solve(problems::AdaptingProblem, max_branches=50, branch_management=false, perturbation_tolerence=0.0, incremental_computation=false, samples=nothing)
+function solve(problems::AdaptingProblem, split_method=:split_by_node_heuristic, max_branches=50, branch_management=false, interval_range=0.0, incremental_computation=false, samples=nothing)
     
-    # solver = perturbation_tolerence > 0 ? IntervalNet(max_iter = 1, delta = (perturbation_tolerence, perturbation_tolerence))
+    # solver = interval_range > 0 ? IntervalNet(max_iter = 1, delta = (interval_range, interval_range))
     #                                     : Neurify(max_iter = 1) # max_iter=1 because we are doing branch management outside.
 
-    solver = IntervalNet(max_iter = 1, delta = (perturbation_tolerence, perturbation_tolerence))
+    solver = IntervalNet(max_iter = 1, delta = (interval_range, interval_range))
 
     problems = AdaptingProblem(problems.networks, convert(HPolytope, problems.input), convert(HPolytope, problems.output))
 
@@ -17,29 +17,26 @@ function solve(problems::AdaptingProblem, max_branches=50, branch_management=fal
     tim_rec = []
     sat_rec = []
     cnt_rec = []
+    cov_rec = []
 
-    problem = Problem(problems.networks[1], problems.input, problems.output)
     splits_order = generate_ordinal_splits_order(problems.networks[1], max_branches)
-    result, branches, samples_branch = init_split_given_order(solver, problem, max_branches, splits_order)
-    # println(solve(solver, problem))
-
-    timed_result = @timed check_all_leaves(solver, problem, branches, incremental_computation)
-    result, result_dict, cnts, forward_result_dict = timed_result.value
-    
-    println("size(branches.leaves)")
-    println(length(branches.leaves))
     last_net_id = 1
-    last_unk_cnt = cnts
-
+    last_unk_cnt = nothing
+    branches = nothing
+    samples_branch = nothing
+    cnts = nothing
+    coverage = nothing
+    forward_result_dict = nothing
     # print_tree(branches, 1)
     
-    for (i, nnet) in enumerate(problems.networks)
+    @showprogress 1 "Verifying last layer change..."  for (i, nnet) in enumerate(problems.networks)
         
         # println("====")
         diff = net_diff(nnet, problems.networks[last_net_id]);
         # println("iter:", i, " net diff: ", diff)
-        if diff < perturbation_tolerence
+        if i > 1 && diff <= interval_range
             append!(cnt_rec, cnts)
+            append!(cov_rec, coverage)
             append!(tim_rec, 0)
             continue
         end
@@ -47,43 +44,38 @@ function solve(problems::AdaptingProblem, max_branches=50, branch_management=fal
 
         problem = Problem(nnet, problems.input, problems.output)
 
-        if !branch_management
-            result, branches, samples_branch = init_split_given_order(solver, problem, max_branches, splits_order)
+        if i == 1 || !branch_management
+            result, branches, samples_branch = init_split(solver, problem, max_branches, split_method, splits_order, samples)
+            forward_result_dict = nothing
         end
 
         timed_result = @timed check_all_leaves(solver, problem, branches, incremental_computation, forward_result_dict)
         result, result_dict, cnts, forward_result_dict = timed_result.value
 
-        if branch_management && cnts[2] > last_unk_cnt[2]
+        if i > 1 && branch_management && cnts[2] > last_unk_cnt[2]
             println("recompute, cnts: ",cnts)
-            result, branches, samples_branch = init_split_given_order(solver, problem, max_branches, splits_order)
+            result, branches, samples_branch = init_split(solver, problem, max_branches, split_method, splits_order, samples)
             timed_result = @timed check_all_leaves(solver, problem, branches, incremental_computation)
             result, result_dict, cnts, forward_result_dict = timed_result.value
-            last_unk_cnt = cnts
         end
-        println("cnts: ",cnts)
+        
+        last_unk_cnt = cnts
         total_time += timed_result.time
-        append!(cnt_rec, cnts)
+        coverage = compute_coverage(branches, result_dict, size(problems.networks[1].layers[1].weights, 2), samples_branch)
 
-        # calc_area(branches, result_dict)
+        append!(cov_rec, coverage)
+        append!(cnt_rec, cnts)
         append!(tim_rec, timed_result.time)
-        # println("Output: ")
-        # println(result)
-        # println("")
-        # println(branches.size)
-        if branch_management
-            merge_holds_nodes!(solver, problem, branches, result_dict) # try to merge holds nodes to save memory resources.
-        end
-        # merge_holds_nodes_general!(solver, problem, branches, result_dict) # try to merge holds nodes to save memory resources.
-        # break
-        # println(branches.size)
-        # println(result_dict)
-        unknown_leaves = [k for (k,v) in result_dict if v.status==:unknown] # because branches.leaves may change in the split process
-        # println(unknown_leaves)
-        for leaf in unknown_leaves
-            # println(leaf, ' ', result_dict[leaf].status)
-            result_dict[leaf].status == :unknown && ordinal_split!(solver, problem, branches, leaf, max_branches, splits_order) # split unknown nodes
-        end
+
+        println("idx, cnts, coverage: ", i, " ",cnts, " ", coverage)
+        
+        # if branch_management
+        #     merge_holds_nodes!(solver, problem, branches, result_dict) # try to merge holds nodes to save memory resources.
+        # end
+        # unknown_leaves = [k for (k,v) in result_dict if v.status==:unknown] # because branches.leaves may change in the split process
+        # for leaf in unknown_leaves
+        #     result_dict[leaf].status == :unknown && ordinal_split!(solver, problem, branches, leaf, max_branches, splits_order) # split unknown nodes
+        # end
 
         # println(branches.size)
         if result.status == :violated 
@@ -104,6 +96,6 @@ function solve(problems::AdaptingProblem, max_branches=50, branch_management=fal
         end
     end
 
-    return tim_rec, cnt_rec
+    return tim_rec, cnt_rec, cov_rec
 
 end
