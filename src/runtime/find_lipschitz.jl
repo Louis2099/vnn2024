@@ -13,7 +13,7 @@ function find_lipschitz(network)
 
     alpha = 0
     beta = 1
-    model = Model(Mosek.Optimizer)
+    model = Model(Mosek.Optimizer); set_silent(model)
 
     N = sum(net_dims[2:end-1])
     id = Matrix(1.0I, N, N)

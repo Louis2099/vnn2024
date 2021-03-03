@@ -71,7 +71,8 @@ export
     solve,
     forward_network,
     check_inclusion,
-    find_lipschitz
+    find_lipschitz,
+    set_distance
 
 solve(m::Model; kwargs...) = JuMP.solve(m; kwargs...)
 export solve

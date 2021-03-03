@@ -86,6 +86,7 @@ function check_inclusion(solver::IntervalNet, nnet::Network,
 
     max_violation = -Inf
     max_violation_con = nothing
+    min_dis = Inf
     for (i, cons) in enumerate(constraints_list(output))
         # NOTE can be taken out of the loop, but maybe there's no advantage
         # NOTE max.(M, 0) * U  + ... is a common operation, and maybe should get a name. It's also an "interval map".
@@ -106,6 +107,8 @@ function check_inclusion(solver::IntervalNet, nnet::Network,
                 max_violation_con = a
             end
 
+            min_dis = min(min_dis, -viol / norm(c))
+
         else
             # TODO can we be more descriptive?
             error("No solution, please check the problem definition.")
@@ -114,9 +117,9 @@ function check_inclusion(solver::IntervalNet, nnet::Network,
     end
 
     if max_violation > 0.0
-        return RuntimeResult(:unknown, max_violation), max_violation_con
+        return RuntimeResult(:unknown, min_dis), max_violation_con
     else
-        return RuntimeResult(:holds, max_violation), max_violation_con
+        return RuntimeResult(:holds, min_dis), max_violation_con
     end
 end
 

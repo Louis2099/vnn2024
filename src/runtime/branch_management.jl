@@ -188,20 +188,37 @@ function check_all_leaves_demand_shifting(solver, problem, branches, incremental
     return BasicResult(:holds), result_dict, (hold_cnt, unkn_cnt, viol_cnt), prev_out_reach
 end
 
+function update_all_leaves(solver, problem, branches, prev_input)
+    input = problem.input
+    diff_idx = []
+    # println("==========================")
+    # @show length(input.constraints), length(prev_input.constraints)
+    for i in 1:length(input.constraints)
+        # spurious, may not be correct. but works well for now.
+        input.constraints[i] != prev_input.constraints[i] && push!(diff_idx, i)
+    end
+    # @show diff_idx
+    # @show input.constraints[diff_idx]
+    for leaf in branches.leaves
+        branches.data[leaf][1].constraints[diff_idx] = input.constraints[diff_idx]
+        # @show branches.data[leaf][1].constraints[diff_idx]
+    end
+end
 
 function enlarge_domain(domain, reachable_set_relaxation)
+    enlarge_domain = copy(domain)
+    reachable_set_relaxation < 0 && return enlarge_domain
     for (i,con) in enumerate(domain.constraints)
-        domain.constraints[i] = HalfSpace(con.a, con.b + reachable_set_relaxation)
+        enlarge_domain.constraints[i] = HalfSpace(con.a, con.b + reachable_set_relaxation)
     end
-    return domain
+    return enlarge_domain
 end
 
 function set_distance(A, B)
     # find max distance between 2 sets.
     # when max_dis < 0, means A is included in B
 
-    
-    model = Model(solver); set_silent(model)
+    model = Model(GLPK.Optimizer); set_silent(model)
     x = @variable(model, [1:dim(A)])
     add_set_constraint!(model, A, x)
     
@@ -210,39 +227,78 @@ function set_distance(A, B)
         # NOTE can be taken out of the loop, but maybe there's no advantage
         # NOTE max.(M, 0) * U  + ... is a common operation, and maybe should get a name. It's also an "interval map".
         a, b = cons.a, cons.b
-        
-        @objective(model, Max, a * [x; 1] - b)
+
+        @objective(model, Max, a' * x - b)
         optimize!(model)
 
         if termination_status(model) == OPTIMAL
-            if compute_output(nnet, value(x)) ∉ B
-                return CounterExampleResult(:violated, value(x)), nothing
-            end
-            dis = objective_value(model)
-            max_dis = max(max_dis, dis)
+            viol = objective_value(model)
+            max_dis = max(max_dis, viol / norm(a))
         else
             error("No solution, please check the problem definition.")
         end
     end
-    
     return max_dis
+    # return max(max_dis, 0)
 end
 
-function check_all_leaves_domain_shifting(solver, problem, branches, reachable_set_relaxation=0, enlarged_inputs=nothing, prev_results=nothing, lipschitz=nothing)
+
+function set_violation(A, B)
+    # find max violation between 2 sets.
+    # when max_vio < 0, means A is included in B
+
+    model = Model(GLPK.Optimizer); set_silent(model)
+    x = @variable(model, [1:dim(A)])
+    add_set_constraint!(model, A, x)
+    
+    max_vio = -Inf
+    for (i, cons) in enumerate(constraints_list(B))
+        # NOTE can be taken out of the loop, but maybe there's no advantage
+        # NOTE max.(M, 0) * U  + ... is a common operation, and maybe should get a name. It's also an "interval map".
+        a, b = cons.a, cons.b
+
+        @objective(model, Max, a' * x - b)
+        optimize!(model)
+
+        if termination_status(model) == OPTIMAL
+            viol = objective_value(model)
+            max_vio = max(max_vio, viol)
+        else
+            error("No solution, please check the problem definition.")
+        end
+    end
+    return max_vio
+    # return max(max_vio, 0)
+end
+
+function check_all_leaves_domain_shifting(solver, problem, branches, reachable_set_relaxation=-1, enlarged_inputs=Dict(), prev_results=Dict(), lipschitz=nothing)
     result_dict = Dict()
     isnothing(enlarged_inputs) && (enlarged_inputs = Dict())
     
     for leaf in branches.leaves
         (domain, splits) =  branches.data[leaf]
         if haskey(enlarged_inputs, leaf) && haskey(prev_results, leaf)
-            if reachable_set_relaxation > 0 || !isnothing(lipschitz)
-                max_dis = set_distance(domain, enlarged_inputs[leaf])
-                if max_dis < 0
-                    result_dict[leaf] = prev_results[leaf]
+            if reachable_set_relaxation >= 0 && issubset(domain, enlarged_inputs[leaf]) # rsr=0 -> branch_management
+                result_dict[leaf] = prev_results[leaf]
+                continue
+            end
+            if !isnothing(lipschitz)
+                input_dis = set_distance(domain, enlarged_inputs[leaf])
+                if input_dis < prev_results[leaf].min_dis / lipschitz
+                    result_dict[leaf] = RuntimeResult(prev_results[leaf].status, prev_results[leaf].min_dis - input_dis * lipschitz)
                     continue
-                elseif max_dis < prev_results[leaf].max_violation
                 end
             end
+            # if reachable_set_relaxation > 0 || !isnothing(lipschitz)
+            #     input_dis = set_distance(domain, enlarged_inputs[leaf])
+            #     if reachable_set_relaxation > 0 && input_dis <= 0
+            #         result_dict[leaf] = prev_results[leaf]
+            #         continue
+            #     elseif !isnothing(lipschitz) && max(input_dis,0) < prev_results[leaf].min_dis / lipschitz
+            #         result_dict[leaf] = RuntimeResult(prev_results[leaf].status, prev_results[leaf].min_dis - max(input_dis,0) * lipschitz)
+            #         continue
+            #     end
+            # end
         end
         enlarged_inputs[leaf] = enlarge_domain(domain, reachable_set_relaxation)
         result_dict[leaf], reach = check_node(solver, problem, enlarged_inputs[leaf])

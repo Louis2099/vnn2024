@@ -61,7 +61,7 @@ function solve(problems::TrainingProblem, split_method=:split_by_node_heuristic,
         result, result_dict, cnts = timed_result.value
 
         if i > 1 && branch_management && cnts[2] > last_cnt[2] # if unknown nodes increases
-            println("re spliting")
+            # println("re spliting")
             result, branches, samples_branch = init_split(solver, problem, max_branches, split_method, splits_order, samples)
             timed_result = @timed check_all_leaves(solver, problem, branches)
             result, result_dict, cnts = timed_result.value
@@ -75,7 +75,7 @@ function solve(problems::TrainingProblem, split_method=:split_by_node_heuristic,
         append!(cnt_rec, cnts)
         append!(tim_rec, timed_result.time)
         
-        println("idx, cnts, coverage: ", i, " ",cnts, " ", coverage)
+        # println("idx, cnts, coverage: ", i, " ",cnts, " ", coverage)
 
         # if branch_management
         #     merge_holds_nodes!(solver, problem, branches, result_dict) # try to merge holds nodes to save memory resources.

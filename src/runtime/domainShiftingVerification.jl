@@ -1,7 +1,9 @@
-function solve(problems::DomainShiftingProblem, split_method=:split_by_node_heuristic, max_branches=50, branch_management=false, lipschitz=nothing, reachable_set_relaxation=0, samples=nothing)
+function solve(problems::DomainShiftingProblem, split_method=:split_by_node_heuristic, max_branches=50, branch_management=false, lipschitz=nothing, reachable_set_relaxation=-1, samples=nothing)
     
     # solver = perturbation_tolerence > 0 ? IntervalNet(max_iter = 1, delta = (perturbation_tolerence, perturbation_tolerence))
     #                                     : Neurify(max_iter = 1) # max_iter=1 because we are doing branch management outside.
+
+    # We assume only one constraint of the input set changes.
 
     solver = IntervalNet(max_iter=1, delta=(0, 0))
 
@@ -29,15 +31,24 @@ function solve(problems::DomainShiftingProblem, split_method=:split_by_node_heur
     coverage = nothing
     # print_tree(branches, 1)
 
+    if branch_management
+        reachable_set_relaxation = max(reachable_set_relaxation, 0)
+
     @showprogress 1 "Verifying input change..." for (i, input) in enumerate(problems.inputs)
         
         problem = Problem(problems.network, input, problems.output)
+        # @show i, length(input.constraints)
 
         if i == 1 || !branch_management
             result, branches, samples_branch = init_split(solver, problem, max_branches, split_method, splits_order, samples)
-            result_dict = nothing
-            enlarged_inputs = nothing
+            result_dict = Dict()
+            enlarged_inputs = Dict()
         end
+
+        if i > 1 && branch_management
+            update_all_leaves(solver, problem, branches, problems.inputs[i-1])
+        end
+
         # println("branch leaves:  ", sort(unique(branches.leaves)))
         # !isnothing(result_dict) && println("before result_dict:    ", sort(collect(keys(result_dict))))
         timed_result = @timed check_all_leaves_domain_shifting(solver, problem, branches, reachable_set_relaxation, enlarged_inputs, result_dict, lipschitz)
@@ -45,9 +56,9 @@ function solve(problems::DomainShiftingProblem, split_method=:split_by_node_heur
         # println("after result_dict:    ", sort(collect(keys(result_dict))))
 
         if i > 1 && branch_management && cnts[2] > last_unk_cnt[2]
-            println("recompute, cnts: ", cnts)
+            # println("recompute, cnts: ", cnts)
             result, branches, samples_branch = init_split(solver, problem, max_branches, split_method, splits_order, samples)
-            timed_result = @timed check_all_leaves_domain_shifting(solver, problem, branches, reachable_set_relaxation, enlarged_inputs, nothing, lipschitz)
+            timed_result = @timed check_all_leaves_domain_shifting(solver, problem, branches, reachable_set_relaxation, enlarged_inputs, Dict(), lipschitz)
             result, result_dict, cnts, enlarged_inputs = timed_result.value
         end
 
@@ -61,7 +72,7 @@ function solve(problems::DomainShiftingProblem, split_method=:split_by_node_heur
         append!(cnt_rec, cnts)
         append!(tim_rec, timed_result.time)
 
-        println("idx, cnts, coverage: ", i, " ", cnts, " ", coverage)
+        # println("idx, cnts, coverage: ", i, " ", cnts, " ", coverage)
         
         # if branch_management
         #     merge_holds_nodes!(solver, problem, branches, result_dict) # try to merge holds nodes to save memory resources.

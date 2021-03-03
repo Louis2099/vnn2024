@@ -139,13 +139,13 @@ end
 
 
 """
-    RuntimeResult(status, max_violation)
+    RuntimeResult(status, min_dis)
 
-Like `BasicResult`, but also returns the maximum violation in the output constraints (if status = :holds, then max_violation < 0).
+Like `BasicResult`, but also returns the maximum violation in the output constraints (min_dis > 0 iff status = :holds).
 """
 struct RuntimeResult <: Result
 	status::Symbol
-	max_violation::Float64
+	min_dis::Float64
     RuntimeResult(s, md) = new(validate_status(s), md)
 end
 

@@ -53,7 +53,7 @@ function solve(problems::AdaptingProblem, split_method=:split_by_node_heuristic,
         result, result_dict, cnts, forward_result_dict = timed_result.value
 
         if i > 1 && branch_management && cnts[2] > last_unk_cnt[2]
-            println("recompute, cnts: ",cnts)
+            # println("recompute, cnts: ",cnts)
             result, branches, samples_branch = init_split(solver, problem, max_branches, split_method, splits_order, samples)
             timed_result = @timed check_all_leaves(solver, problem, branches, incremental_computation)
             result, result_dict, cnts, forward_result_dict = timed_result.value
@@ -67,7 +67,7 @@ function solve(problems::AdaptingProblem, split_method=:split_by_node_heuristic,
         append!(cnt_rec, cnts)
         append!(tim_rec, timed_result.time)
 
-        println("idx, cnts, coverage: ", i, " ",cnts, " ", coverage)
+        # println("idx, cnts, coverage: ", i, " ",cnts, " ", coverage)
         
         # if branch_management
         #     merge_holds_nodes!(solver, problem, branches, result_dict) # try to merge holds nodes to save memory resources.
