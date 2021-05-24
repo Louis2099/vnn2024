@@ -24,7 +24,7 @@ function read_nnet(fname::String; last_layer_activation = Id())
     # i=1 corresponds to the input dimension, so it's ignored
     layers = Layer[read_layer(dim, f) for dim in layer_sizes[2:end-1]]
     push!(layers, read_layer(last(layer_sizes), f, last_layer_activation))
-
+    close(f);
     return Network(layers)
 end
 

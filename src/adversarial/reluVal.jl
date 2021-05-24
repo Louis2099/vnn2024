@@ -45,14 +45,14 @@ function solve(solver::ReluVal, problem::Problem)
         result = check_inclusion(reach.sym, problem.output, problem.network)
 
         if result.status === :violated
-            return result
+            return result, i
         elseif result.status === :unknown
             intervals = bisect_interval_by_max_smear(problem.network, reach)
             append!(reach_list, intervals)
         end
-        isempty(reach_list) && return CounterExampleResult(:holds)
+        isempty(reach_list) && return CounterExampleResult(:holds), i
     end
-    return CounterExampleResult(:unknown)
+    return CounterExampleResult(:unknown), solver.max_iter
 end
 
 function bisect_interval_by_max_smear(nnet::Network, reach::SymbolicIntervalMask)

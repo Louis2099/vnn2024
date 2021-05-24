@@ -1,4 +1,4 @@
-function solve(problems::DomainShiftingProblem, split_method=:split_by_node_heuristic, max_branches=50, branch_management=false, lipschitz=nothing, reachable_set_relaxation=-1, samples=nothing)
+function solve(problems::DomainShiftingProblem, split_method=:split_by_node_heuristic, max_branches=50, branch_management=false, lipschitz=nothing, reachable_set_relaxation=0, samples=nothing)
     
     # solver = perturbation_tolerence > 0 ? IntervalNet(max_iter = 1, delta = (perturbation_tolerence, perturbation_tolerence))
     #                                     : Neurify(max_iter = 1) # max_iter=1 because we are doing branch management outside.
@@ -31,8 +31,9 @@ function solve(problems::DomainShiftingProblem, split_method=:split_by_node_heur
     coverage = nothing
     # print_tree(branches, 1)
 
-    if branch_management
-        reachable_set_relaxation = max(reachable_set_relaxation, 0)
+    if !branch_management
+        reachable_set_relaxation = -1
+    end
 
     @showprogress 1 "Verifying input change..." for (i, input) in enumerate(problems.inputs)
         

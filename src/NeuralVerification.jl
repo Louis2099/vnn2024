@@ -2,7 +2,7 @@ module NeuralVerification
 
 using JuMP
 
-using GLPK, SCS # SCS only needed for Certify
+using GLPK, SCS, CPLEX # SCS only needed for Certify
 using PicoSAT # needed for Planet
 using LazySets, LazySets.Approximations
 using Polyhedra, CDDLib
@@ -16,7 +16,7 @@ import LazySets: dim, HalfSpace # necessary to avoid conflict with Polyhedra
 using Requires
 
 # Runtime verification dependencies
-using OrderedCollections, Plots
+using OrderedCollections
 using ProgressMeter
 using SparseArrays
 using MosekTools
@@ -57,6 +57,7 @@ export
     GeneralAct,
     PiecewiseLinear,
     Problem,
+    TrackingProblem,
     TrainingProblem,
     AdaptingProblem,
     DomainShiftingProblem,
@@ -65,9 +66,11 @@ export
     BasicResult,
     CounterExampleResult,
     AdversarialResult,
+    TrackingResult,
     ReachabilityResult,
     read_nnet,
     write_nnet,
+    compute_output,
     solve,
     forward_network,
     check_inclusion,
@@ -87,7 +90,8 @@ include("optimization/duality.jl")
 include("optimization/certify.jl")
 include("optimization/iLP.jl")
 include("optimization/mipVerify.jl")
-export NSVerify, ConvDual, Duality, Certify, ILP, MIPVerify
+include("optimization/nnDyn.jl")
+export NSVerify, ConvDual, Duality, Certify, ILP, MIPVerify, NNDynTrack
 
 include("reachability/utils/reachability.jl")
 include("reachability/exactReach.jl")

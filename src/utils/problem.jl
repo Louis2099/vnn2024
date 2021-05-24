@@ -50,6 +50,24 @@ struct Problem{P, Q}
     output::Q
 end
 
+struct TrackingProblem{P, Q, R, S}
+    network::Network
+    input::P
+    output::Q
+    output_ref::R
+    output_cost::S
+end
+
+struct MPCProblem{P, Q, R, S}
+    network::Network
+    input::P
+    output::Q
+    output_ref::R
+    output_cost::S
+    horizon::Int
+    dt::Float64
+end
+
 
 struct TrainingProblem{P, Q}
     networks::Array
@@ -149,7 +167,20 @@ struct RuntimeResult <: Result
     RuntimeResult(s, md) = new(validate_status(s), md)
 end
 
+"""
+    TrackingResult(status, max_disturbance)
+
+Like `BasicResult`, but also returns the maximum allowable disturbance in the input (if status = :violated).
+"""
+struct TrackingResult <: Result
+	status::Symbol
+    input::Vector{Float64}
+    objective::Float64
+    TrackingResult(s, i, o) = new(validate_status(s), i, o)
+end
+
 # Additional constructors:
+TrackingResult(s) = TrackingResult(s, Float64[], 0)
 CounterExampleResult(s) = CounterExampleResult(s, Float64[])
 AdversarialResult(s)    = AdversarialResult(s, -1.0)
 ReachabilityResult(s)   = ReachabilityResult(s, AbstractPolytope[])

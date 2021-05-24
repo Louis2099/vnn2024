@@ -35,6 +35,46 @@ Sound but not complete.
 end
 
 
+
+function solve(solver::Neurify, problem::Problem, max_branches, split_method)
+    isbounded(problem.input) || throw(UnboundedInputError("Neurify can only handle bounded input sets."))
+
+    # Because of over-approximation, a split may not bisect the input set.
+    # Therefore, the gradient remains unchanged (since input didn't change).
+    # And this node will be chosen to split forever.
+    # To prevent this, we split each node only once if the gradient of this node hasn't changed.
+    # Each element in splits is a tuple (layer_index, node_index, node_gradient).
+
+    nnet, output = problem.network, problem.output
+    reaches = Dict()
+    branches = nothing
+
+    @time begin
+        for t = 1:100
+            splits_order = generate_ordinal_splits_order(problem.network, max_branches)
+            result, branches, _ = init_split(solver, problem, max_branches, split_method, splits_order)
+        end
+    end
+    
+    @time begin
+        for t = 1:100
+            for leaf in branches.leaves
+                (domain, splits) =  branches.data[leaf]
+                reaches[leaf] = forward_network(solver, nnet, domain)
+            end
+        end
+    end
+
+    @time begin
+        for t = 1:100
+            for leaf in branches.leaves
+                result, _ = check_inclusion(solver, nnet, last(reaches[leaf]).sym, output)
+            end
+        end
+    end
+end
+
+
 function solve(solver::Neurify, problem::Problem)
     isbounded(problem.input) || throw(UnboundedInputError("Neurify can only handle bounded input sets."))
 
@@ -57,7 +97,7 @@ function solve(solver::Neurify, problem::Problem)
         result, max_violation_con = check_inclusion(solver, nnet, last(reach).sym, output)
 
         if result.status === :violated
-            return result
+            return result, i
         elseif result.status === :unknown
             subdomains = constraint_refinement(nnet, reach, max_violation_con, splits)
             for domain in subdomains
@@ -65,9 +105,9 @@ function solve(solver::Neurify, problem::Problem)
             end
 
         end
-        isempty(reach_list) && return CounterExampleResult(:holds)
+        isempty(reach_list) && return CounterExampleResult(:holds), i
     end
-    return CounterExampleResult(:unknown)
+    return CounterExampleResult(:unknown), solver.max_iter
 end
 
 function check_inclusion(solver::Neurify, nnet::Network,
