@@ -30,6 +30,7 @@ Sound but not complete.
 @with_kw struct ReluVal <: Solver
     max_iter::Int64     = 10
     tree_search::Symbol = :DFS # only :DFS/:BFS allowed? If so, we should assert this.
+    split_method::Symbol = :smear
 end
 
 function solve(solver::ReluVal, problem::Problem)
@@ -47,13 +48,23 @@ function solve(solver::ReluVal, problem::Problem)
         if result.status === :violated
             return result
         elseif result.status === :unknown
-            intervals = bisect_interval_by_max_smear(problem.network, reach)
+            intervals = solver.split_method == :smear ? bisect_interval_by_max_smear(problem.network, reach) : bisect_interval_by_max_dim(problem.network, reach)
             append!(reach_list, intervals)
         end
         isempty(reach_list) && return CounterExampleResult(:holds)
     end
     return CounterExampleResult(:unknown)
 end
+
+
+function bisect_interval_by_max_dim(nnet::Network, reach::SymbolicIntervalMask)
+    original_domain = reach.sym.domain
+    B = box_approximation(original_domain)
+    dim_sizes = [(high(B, i) - low(B, i)) for i in 1:dim(B)]
+    (max_len, max_dim) = findmax(dim_sizes)
+    return collect(split_interval(reach.sym.domain, max_dim))
+end
+
 
 function bisect_interval_by_max_smear(nnet::Network, reach::SymbolicIntervalMask)
     LG, UG = get_gradient_bounds(nnet, reach.LΛ, reach.UΛ)

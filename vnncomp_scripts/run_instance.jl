@@ -27,7 +27,7 @@ function verify_an_instance(onnx_file, spec_file)
         X = Hyperrectangle(low = [specs[i][1]], high = [specs[i][2]])
         Y = leq ? HalfSpace([-1.], -specs[i][3]) : HalfSpace([1.], specs[i][3])
 
-        solver = ReluVal(max_iter=100)
+        solver = ReluVal(max_iter=100, split_mehtd=:dim)
         prob = Problem(net, X, Y)
         res = solve(solver, prob)
         
