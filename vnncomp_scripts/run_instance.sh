@@ -15,6 +15,8 @@ TIMEOUT=$6
 echo "Running benchmark instance in category '$CATEGORY' with onnx file '$ONNX_FILE', vnnlib file '$VNNLIB_FILE', results file $RESULTS_FILE, and timeout $TIMEOUT"
 
 # run the tool to produce the results file
-script_full_path=$(dirname "$0")
-julia "${script_full_path}/run_instance.jl" "$ONNX_FILE" "$VNNLIB_FILE" "$RESULTS_FILE"
+script_name=$0
+script_path=$(dirname "$0")
+project_path=$(dirname "$script_path")
+julia --project="${project_path}" "${script_path}/run_instance.jl" "$ONNX_FILE" "$VNNLIB_FILE" "$RESULTS_FILE"
 exit 0

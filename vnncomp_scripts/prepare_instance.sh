@@ -25,6 +25,7 @@ killall -q julia
 yes n | gzip -kd "$ONNX_FILE"
 
 script_name=$0
-script_full_path=$(dirname "$0")
-julia "${script_full_path}/prepare_instance.jl"  "$ONNX_FILE"
+script_path=$(dirname "$0")
+project_path=$(dirname "$script_path")
+julia --project="${project_path}" "${script_path}/prepare_instance.jl"  "$ONNX_FILE"
 exit 0
