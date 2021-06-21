@@ -21,7 +21,7 @@ fi
 # kill any zombie processes
 killall -q julia
 
-yes n | gzip -kd "$ONNX_FILE"
+yes n | case $ONNX_FILE in *.gz) gzip -kd $ONNX_FILE;; esac
 
 script_name=$0
 script_path=$(dirname "$0")
