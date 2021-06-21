@@ -8,6 +8,7 @@ apt-get install build-essential -y
 apt-get install git -y
 apt-get install python3 -y
 apt-get install pip -y
+apt-get install psmisc
 
 cd NeuralVerification.jl
 echo '
