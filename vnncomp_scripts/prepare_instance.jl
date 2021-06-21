@@ -1,6 +1,6 @@
 using PyCall
 function onnx_to_nnet(onnx_file)
-    pushfirst!(PyVector(pyimport("sys")."path"), "./")
+    pushfirst!(PyVector(pyimport("sys")."path"), @__DIR__)
     nnet = pyimport("NNet")
     use_gz = split(onnx_file, ".")[end] == "gz"
     if use_gz

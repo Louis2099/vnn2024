@@ -21,11 +21,12 @@ fi
 # kill any zombie processes
 killall -q julia
 
-# script returns a 0 exit code if successful. If you want to skip a benchmark category you can return non-zero.
 yes n | gzip -kd "$ONNX_FILE"
 
 script_name=$0
 script_path=$(dirname "$0")
 project_path=$(dirname "$script_path")
 julia --project="${project_path}" "${script_path}/prepare_instance.jl"  "$ONNX_FILE"
+
+# script returns a 0 exit code if successful. If you want to skip a benchmark category you can return non-zero.
 exit 0
