@@ -29,7 +29,7 @@ function verify_an_instance(onnx_file, spec_file)
 
         solver = ReluVal(max_iter=100)
         prob = Problem(net, X, Y)
-        res = solve(solver, prob)[1]
+        res = solve(solver, prob)
         
         @show res
         if res.status == :violated
