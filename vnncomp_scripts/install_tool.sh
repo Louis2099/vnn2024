@@ -1,5 +1,5 @@
 apt-get update -y
-apt-get wget -y
+apt-get install wget -y
 wget https://julialang-s3.julialang.org/bin/linux/x64/1.6/julia-1.6.1-linux-x86_64.tar.gz
 tar -xvzf julia-1.6.1-linux-x86_64.tar.gz
 cp -r julia-1.6.1 /opt/
