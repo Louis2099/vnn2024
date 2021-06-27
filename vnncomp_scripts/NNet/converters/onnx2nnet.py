@@ -41,22 +41,12 @@ def onnx2nnet(onnxFile, inputMins=None, inputMaxes=None, means=None, ranges=None
 
     model = onnx.load(onnxFile)
     graph = model.graph
-    print(len(graph.input))
 
     inp, out = get_io_nodes(model)
 
     inputName = inp.name
     outputName = out.name
 
-    # if not inputName:
-    #     # assert len(graph.input)==1
-    #     inputName = graph.input[0].name
-    # if not outputName:
-    #     # assert len(graph.output)==1
-    #     outputName = graph.output[0].name
-    
-    print(inputName)
-    print(outputName)
     # Search through nodes until we find the inputName.
     # Accumulate the weight matrices and bias vectors into lists.
     # Continue through the network until we reach outputName.
@@ -67,13 +57,10 @@ def onnx2nnet(onnxFile, inputMins=None, inputMaxes=None, means=None, ranges=None
     cnt = 0
     while inputName != outputName:
         cnt += 1
-
-        print("===================================")
         # Loop through nodes in graph
         for node in graph.node:
             # Ignore nodes that do not use inputName as an input to the node
             if inputName in node.input:
-                print("inputNmae: ", inputName)
                 
                 # This supports three types of nodes: MatMul, Add, and Relu
                 # The .nnet file format specifies only feedforward fully-connected Relu networks, so
@@ -131,12 +118,7 @@ def onnx2nnet(onnxFile, inputMins=None, inputMaxes=None, means=None, ranges=None
                     
                     # Extract the value of the bias vector from the initializers
                     biases+= [-numpy_helper.to_array(inits).flatten() for inits in graph.initializer if inits.name==biasName]
-
-                    print(np.size(biases[-1]))
                     weights+= [np.eye(np.size(biases[-1]))]
-                    
-                    print(biases)
-                    print(weights)
 
                     # Update inputName to be the output of this node
                     inputName = node.output[0]
@@ -162,12 +144,6 @@ def onnx2nnet(onnxFile, inputMins=None, inputMaxes=None, means=None, ranges=None
                 
 
     # Check if the weights and biases were extracted correctly from the graph
-    print(inputName)
-    print(outputName)
-    print(len(weights))
-    print(len(biases))
-    print([np.shape(w) for w in weights])
-    print([np.shape(b) for b in biases])
     if outputName==inputName and len(weights)>0 and len(weights)==len(biases):
         
         inputSize = weights[0].shape[0]
