@@ -30,7 +30,7 @@ function verify_an_instance(onnx_file, spec_file)
                 Y = HPolytope(-A, -b)
                 solver = ReluVal(max_iter=1000)
                 prob = Problem(net, X, Y)
-                res = solve(solver, prob)[1]
+                res = solve(solver, prob)
             end
             
             res.status == :violated && (return "violated")
