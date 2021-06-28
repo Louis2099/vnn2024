@@ -26,5 +26,5 @@ Pkg.add("PyCall")
 
 script_name=$0
 script_path=$(dirname "$0")
-chmod +x "${script_path}/*.sh"
+chmod +x ${script_path}/*.sh
 pip install -r "${script_path}/NNet/test_requirements.txt"
