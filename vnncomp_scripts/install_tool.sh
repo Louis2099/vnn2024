@@ -1,7 +1,5 @@
 apt-get update -y
 apt-get install sudo -y
-sudo apt-get install software-properties-common -y
-sudo apt-add-repository universe -y
 sudo apt-get update -y
 sudo apt-get install wget -y
 sudo wget https://julialang-s3.julialang.org/bin/linux/x64/1.6/julia-1.6.1-linux-x86_64.tar.gz
