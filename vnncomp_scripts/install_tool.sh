@@ -1,5 +1,5 @@
 apt-get update -y
-apt-get -y install sudo
+apt-get install sudo -y
 sudo apt-get install wget -y
 sudo wget https://julialang-s3.julialang.org/bin/linux/x64/1.6/julia-1.6.1-linux-x86_64.tar.gz
 sudo tar -xvzf julia-1.6.1-linux-x86_64.tar.gz
@@ -10,8 +10,13 @@ sudo apt-get install git -y
 sudo apt-get install python3 -y
 sudo apt-get install pip -y
 sudo apt-get install psmisc
+source ~/.bashrc
 
-cd NeuralVerification.jl
+script_name=$0
+script_path=$(dirname "$0")
+project_path=$(dirname "$script_path")
+
+cd $project_path
 echo '
 using Pkg
 Pkg.activate(".")
@@ -19,5 +24,7 @@ Pkg.instantiate()
 Pkg.add("PyCall")
 ' | julia
 
-chmod +x vnncomp_scripts/*.sh
-pip install -r vnncomp_scripts/NNet/test_requirements.txt
+script_name=$0
+script_path=$(dirname "$0")
+chmod +x "${script_path}/*.sh"
+pip install -r "${script_path}/NNet/test_requirements.txt"
