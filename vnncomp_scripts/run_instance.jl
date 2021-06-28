@@ -28,7 +28,7 @@ function verify_an_instance(onnx_file, spec_file)
                 res = solve(solver, prob)
             else
                 Y = HPolytope(-A, -b)
-                solver = ReluVal(max_iter=1000)
+                solver = ReluVal(max_iter=1e9)
                 prob = Problem(net, X, Y)
                 res = solve(solver, prob)
             end
