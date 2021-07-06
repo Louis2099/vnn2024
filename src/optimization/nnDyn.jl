@@ -6,6 +6,7 @@ function solve(solver::NNDynTrack, problem::TrackingProblem, start_values=nothin
     model = Model(solver)
     set_silent(model)
     set_optimizer_attribute(model, "CPX_PARAM_EPOPT", 1e-8)
+    set_optimizer_attribute(model, "CPX_PARAM_EPAGAP", 1e-6)
     
     z = init_vars(model, problem.network, :z, with_input=true)
 
@@ -29,7 +30,7 @@ function solve(solver::NNDynTrack, problem::TrackingProblem, start_values=nothin
     if termination_status(model) == OPTIMAL
         return TrackingResult(:holds, value(first(z)), objective_value(model)), value.(all_variables(model))
     else
-        @show termination_status(model)
+        # @show termination_status(model)
         return TrackingResult(:violated), start_values
     end
 end
