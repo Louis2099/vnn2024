@@ -133,6 +133,12 @@ struct CounterExampleResult <: Result
     CounterExampleResult(s, ce) = new(validate_status(s), ce)
 end
 
+struct CounterExamplesResult <: Result
+    status::Symbol
+    counter_examples::Vector{Vector{Float64}}
+    CounterExamplesResult(s, ce) = new(validate_status(s), ce)
+end
+
 """
     AdversarialResult(status, max_disturbance)
 
@@ -182,5 +188,6 @@ end
 # Additional constructors:
 TrackingResult(s) = TrackingResult(s, Float64[], 0)
 CounterExampleResult(s) = CounterExampleResult(s, Float64[])
+CounterExamplesResult(s) = CounterExamplesResult(s, [])
 AdversarialResult(s)    = AdversarialResult(s, -1.0)
 ReachabilityResult(s)   = ReachabilityResult(s, AbstractPolytope[])
