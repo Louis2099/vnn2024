@@ -118,8 +118,6 @@ function encode_ij(LP, model, i, j)
     end
 end
 
-
-
 function encode_relu(::SlackLP, model, ẑᵢⱼ, zᵢⱼ, δᵢⱼ, sᵢⱼ)
     if δᵢⱼ
         @constraint(model, zᵢⱼ == ẑᵢⱼ + sᵢⱼ)

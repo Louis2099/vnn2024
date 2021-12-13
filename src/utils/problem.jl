@@ -135,7 +135,7 @@ end
 
 struct CounterExamplesResult <: Result
     status::Symbol
-    counter_examples::Vector{Vector{Float64}}
+    counter_examples
     CounterExamplesResult(s, ce) = new(validate_status(s), ce)
 end
 

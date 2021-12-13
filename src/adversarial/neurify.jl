@@ -83,7 +83,7 @@ function solve(solver::Neurify, problem::Problem; sampling_size=1)
     # And this node will be chosen to split forever.
     # To prevent this, we split each node only once if the gradient of this node hasn't changed.
     # Each element in splits is a tuple (layer_index, node_index, node_gradient).
-
+    print("Neurify Solving")
     nnet, output = problem.network, problem.output
     reach_list = []
     domain = init_symbolic_grad(problem.input)
@@ -109,11 +109,62 @@ function solve(solver::Neurify, problem::Problem; sampling_size=1)
     return CounterExamplesResult(:unknown), solver.max_iter
 end
 
+function my_sample(box_set, size, sampler)
+    samples = []
+    ub = high(box_set)
+    lb = low(box_set)
+
+    A = []
+    b = []
+    for con in sampler.constraints
+        push!(A, con.a)
+        push!(b, con.b)
+    end
+    A = transpose(hcat(A...))
+    
+    # @show A
+    # @show b
+
+    # @show ub
+    # @show lb
+
+    for i = 1:size
+        sample = rand(Float64, (length(lb), 1)) .* (ub .- lb) .+ lb
+        inside = all(A * sample .< b)
+        # @show sample
+        # @show inside
+        inside || continue
+        push!(samples, vec(sample))
+    end
+
+    return samples
+end
+
 function sample_counter_examples(input, output, nnet, sampling_size)
+    print("sampling")
     sampler = LazySets.RejectionSampler(input)
     input_approx = LazySets.box_approximation(input);
-    samples = LazySets.sample(input_approx, sampling_size; sampler=sampler)
-    counter_examp1es = [sample for sample in samples if compute_output(nnet, sample) ∉ output]
+    @show input
+    @show input_approx
+    # samples = LazySets.sample(input_approx, sampling_size; sampler=sampler)
+    samples = my_sample(input_approx, sampling_size, input)
+    
+    counter_examp1es = [(sample, input) for sample in samples if compute_output(nnet, sample) ∉ output]
+    # counter_examp1es = []
+    # for sample in samples 
+    #     # @show samples
+    #     @show sample
+    #     @show vec(sample)
+    #     com = compute_output(nnet, vec(sample))
+    #     @show sample
+    #     @show com
+    #     @show output
+    #     @show com ∉ output
+    #     if compute_output(nnet, vec(sample)) ∉ output
+    #         push!(counter_examp1es, sample)
+    #     end
+    # end
+    # @show counter_examp1es
     return counter_examp1es
 end
 
@@ -122,7 +173,6 @@ function check_inclusion(solver::Neurify, nnet::Network,
     # The output constraint is in the form A*x < b
     # We try to maximize output constraint to find a violated case, or to verify the inclusion.
     # Suppose the output is [1, 0, -1] * x < 2, Then we are maximizing reach.Up[1] * 1 + reach.Low[3] * (-1)
-
 
     input_domain = domain(reach)
 
@@ -144,7 +194,8 @@ function check_inclusion(solver::Neurify, nnet::Network,
         if termination_status(model) == OPTIMAL
             if compute_output(nnet, value(x)) ∉ output
                 counter_examples = sample_counter_examples(input_domain, output, nnet, sampling_size-1)
-                push!(counter_examples, value(x))
+                push!(counter_examples, (value(x), input_domain))
+                @show (value(x), input_domain)
                 return CounterExamplesResult(:violated, counter_examples), nothing
             end
 

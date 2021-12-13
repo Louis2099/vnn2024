@@ -75,7 +75,9 @@ export
     forward_network,
     check_inclusion,
     find_lipschitz,
-    set_distance
+    set_distance,
+    get_gradient_bounds,
+    get_gradient
 
 solve(m::Model; kwargs...) = JuMP.solve(m; kwargs...)
 export solve
