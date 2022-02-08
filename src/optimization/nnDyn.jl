@@ -19,7 +19,10 @@ function solve(solver::NNDynTrack, problem::TrackingProblem, start_values=nothin
     add_set_constraint!(model, problem.output, last(z))
     encode_network!(model, problem.network, BoundedMixedIntegerLP())
 
-    o = symbolic_infty_norm((last(z) - problem.output_ref).*problem.output_cost)
+    # o = symbolic_abs((last(z) - problem.output_ref).*problem.output_cost)
+    
+    d = (last(z) - problem.output_ref)
+    o = dot(d, d.*problem.output_cost)
     
     @objective(model, Min, o)
 
