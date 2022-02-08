@@ -1,4 +1,4 @@
-function solve(problems::AdaptingProblem, split_method=:split_by_node_heuristic, max_branches=50, branch_management=false, interval_range=0.0, incremental_computation=false, samples=nothing)
+function solve(problems::AdaptingProblem, split_method=:split_by_node_heuristic, max_branches=50; branch_management=false, interval_range=0.0, incremental_computation=false, samples=nothing)
     
     # solver = interval_range > 0 ? IntervalNet(max_iter = 1, delta = (interval_range, interval_range))
     #                                     : Neurify(max_iter = 1) # max_iter=1 because we are doing branch management outside.

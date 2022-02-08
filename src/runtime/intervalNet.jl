@@ -32,7 +32,7 @@ Sound but not complete.
     max_iter::Int64     = 100
     tree_search::Symbol = :DFS
     optimizer = GLPK.Optimizer
-    delta::Tuple{Float64, Float64} =(0,0)
+    deltas = nothing
     enlarge = 0
 end
 
@@ -129,19 +129,23 @@ function forward_network(solver::IntervalNet, network::Network, input)
 end
 
 function forward_network(solver::IntervalNet, network::Network, input::SymbolicIntervalGradient)
-    reachable = [input = forward_layer(solver, L, input) for L in network.layers]
+    if isnothing(solver.deltas)
+        reachable = [input = forward_layer(solver, L, input, (0.,0.)) for L in network.layers]
+    else
+        reachable = [input = forward_layer(solver, L, input, delta) for (L, delta) in zip(network.layers, solver.deltas)]
+    end
     return reachable
 end
 
-function forward_layer(solver::IntervalNet, layer::Layer, input)
-    return forward_act(solver, forward_linear(solver, input, layer), layer)
+function forward_layer(solver::IntervalNet, layer::Layer, input, delta)
+    return forward_act(solver, forward_linear(solver, input, delta, layer), layer)
 end
 
 # Symbolic forward_linear
-function forward_linear(solver::IntervalNet, input::SymbolicIntervalGradient, layer::Layer)
-    output_Low, output_Up = interval_map(layer.weights, input.sym.Low, input.sym.Up, solver.delta[1])
-    output_Up[:, end] += layer.bias .+ solver.delta[2]
-    output_Low[:, end] += layer.bias .- solver.delta[2]
+function forward_linear(solver::IntervalNet, input::SymbolicIntervalGradient, delta::Tuple{Float64,Float64}, layer::Layer)
+    output_Low, output_Up = interval_map(layer.weights, input.sym.Low, input.sym.Up, delta[1])
+    output_Up[:, end] += layer.bias .+ delta[2]
+    output_Low[:, end] += layer.bias .- delta[2]
     sym = SymbolicInterval(output_Low, output_Up, domain(input))
     return SymbolicIntervalGradient(sym, input.LΛ, input.UΛ)
 end

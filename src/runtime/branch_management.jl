@@ -59,7 +59,8 @@ function ordinal_split!(solver, problem, branches::Tree, x::Int, max_size::Int, 
     result, max_violation_con = check_inclusion(solver, nnet, last(reach).sym, output)
     # branches.data[x] = (domain, max_violation_con, splits) # because max_violation_con is not calculated before (set as 0)
     
-    result.status == :unknown || return result
+    # result.status == :unknown || (return result)
+    result.status == :holds && (return result)
     
     if tree_size(branches) >= max_size
         return BasicResult(:unknown)
@@ -111,6 +112,7 @@ function init_split(solver, problem, max_branches, split_method = :split_by_node
     branches = Tree((problem.input, Vector()))
     result = ordinal_split!(solver, problem, branches, 1, max_branches, split_method, splits_order) # split by dimension
     samples_branch = nothing
+    # @show length(branches.leaves)
     if !isnothing(samples)
         samples_branch = []
         for (i,sample) in enumerate(samples)
@@ -188,7 +190,7 @@ function check_all_leaves_demand_shifting(solver, problem, branches, incremental
     return BasicResult(:holds), result_dict, (hold_cnt, unkn_cnt, viol_cnt), prev_out_reach
 end
 
-function update_all_leaves(solver, problem, branches, prev_input)
+function update_all_leaves!(solver, problem, branches, prev_input)
     input = problem.input
     diff_idx = []
     # println("==========================")
@@ -274,12 +276,13 @@ end
 function check_all_leaves_domain_shifting(solver, problem, branches, reachable_set_relaxation=-1, enlarged_inputs=Dict(), prev_results=Dict(), lipschitz=nothing)
     result_dict = Dict()
     isnothing(enlarged_inputs) && (enlarged_inputs = Dict())
-    
+    rsr_saved_cnt = 0
     for leaf in branches.leaves
         (domain, splits) =  branches.data[leaf]
         if haskey(enlarged_inputs, leaf) && haskey(prev_results, leaf)
-            if reachable_set_relaxation >= 0 && issubset(domain, enlarged_inputs[leaf]) # rsr=0 -> branch_management
+            if reachable_set_relaxation >= 0 && (isempty(domain) || issubset(domain, enlarged_inputs[leaf])) # rsr=0 -> branch_management
                 result_dict[leaf] = prev_results[leaf]
+                rsr_saved_cnt += 1
                 continue
             end
             if !isnothing(lipschitz)
@@ -303,6 +306,7 @@ function check_all_leaves_domain_shifting(solver, problem, branches, reachable_s
         enlarged_inputs[leaf] = enlarge_domain(domain, reachable_set_relaxation)
         result_dict[leaf], reach = check_node(solver, problem, enlarged_inputs[leaf])
     end
+    # println("RSR saved:", rsr_saved_cnt, "/", length(branches.leaves))
     
     hold_cnt = count(x->x[2].status==:holds,result_dict)
     unkn_cnt = count(x->x[2].status==:unknown,result_dict)

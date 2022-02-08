@@ -2,18 +2,29 @@ function net_diff(net1, net2)
     max_delta = 0
     for (i, layer1) in enumerate(net1.layers)
         layer2 = net2.layers[i]
-        max_delta = max(max_delta, maximum(layer1.weights - layer2.weights))
-        max_delta = max(max_delta, maximum(layer1.bias - layer2.bias))
+        max_delta = max(max_delta, maximum(abs.(layer1.weights - layer2.weights)))
+        max_delta = max(max_delta, maximum(abs.(layer1.bias - layer2.bias)))
     end
     return max_delta
 end
 
-function solve(problems::TrainingProblem, split_method=:split_by_node_heuristic, max_branches=50, branch_management=false, interval_range=0.0, samples=nothing)
+function net_diffs(net1, net2)
+    diffs = []
+    for (i, layer1) in enumerate(net1.layers)
+        layer2 = net2.layers[i]
+        push!(diffs, (maximum(abs.(layer1.weights - layer2.weights)),  maximum(abs.(layer1.bias - layer2.bias))))
+    end
+    return diffs
+end
+
+function solve(problems::TrainingProblem, split_method=:split_by_node_heuristic, max_branches=50; branch_management=false, interval_range=nothing, samples=nothing)
     
     # solver = interval_range > 0 ? IntervalNet(max_iter = 1, delta = (interval_range, interval_range))
     #                                     : Neurify(max_iter = 1) # max_iter=1 because we are doing branch management outside.
 
-    solver = IntervalNet(max_iter = 1, delta = (interval_range, interval_range))
+    isnothing(interval_range) && (interval_range = [(0.,0.) for i in 1:length(problems.networks[1].layers)])
+
+    solver = IntervalNet(max_iter = 1, deltas = interval_range)
 
     problems = TrainingProblem(problems.networks, convert(HPolytope, problems.input), convert(HPolytope, problems.output))
 
@@ -41,9 +52,11 @@ function solve(problems::TrainingProblem, split_method=:split_by_node_heuristic,
     @showprogress 1 "Verifying weights change..." for (i, nnet) in enumerate(problems.networks)
         sleep(0.01)
         # println("====")
-        diff = net_diff(nnet, problems.networks[last_net_id]);
+        # diff = net_diff(nnet, problems.networks[last_net_id]);
+        diffs = net_diffs(nnet, problems.networks[last_net_id]);
         # println("iter:", i, " net diff: ", diff)
-        if i > 1 && diff <= interval_range
+        in_INN = all([l1[1] <= l2[1] && l1[2] <= l2[2] for (l1, l2) in zip(diffs, interval_range)])
+        if i > 1 && in_INN
             append!(cnt_rec, cnts)
             append!(cov_rec, coverage)
             append!(tim_rec, 0)
