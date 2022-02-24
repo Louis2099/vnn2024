@@ -132,7 +132,7 @@ function check_node(solver, problem, domain, last_layer_reach = nothing)
     if isnothing(last_layer_reach)
         reach = forward_network(solver, problem.network, domain)
     else
-        reach = [last_layer_reach, forward_layer(solver, problem.network.layers[end], last_layer_reach)]
+        reach = [last_layer_reach, forward_layer(solver, problem.network.layers[end], last_layer_reach, solver.deltas[end])]
     end
     result, max_violation_con = check_inclusion(solver, problem.network, last(reach).sym, problem.output)
     return result, reach

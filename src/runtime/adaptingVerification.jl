@@ -1,9 +1,11 @@
-function solve(problems::AdaptingProblem, split_method=:split_by_node_heuristic, max_branches=50; branch_management=false, interval_range=0.0, incremental_computation=false, samples=nothing)
+function solve(problems::AdaptingProblem, split_method=:split_by_node_heuristic, max_branches=50; branch_management=false, interval_range=nothing, incremental_computation=false, samples=nothing)
     
     # solver = interval_range > 0 ? IntervalNet(max_iter = 1, delta = (interval_range, interval_range))
     #                                     : Neurify(max_iter = 1) # max_iter=1 because we are doing branch management outside.
 
-    solver = IntervalNet(max_iter = 1, delta = (interval_range, interval_range))
+    isnothing(interval_range) && (interval_range = [(0.,0.) for i in 1:length(problems.networks[1].layers)])
+
+    solver = IntervalNet(max_iter = 1, deltas = interval_range)
 
     problems = AdaptingProblem(problems.networks, convert(HPolytope, problems.input), convert(HPolytope, problems.output))
 
@@ -32,9 +34,9 @@ function solve(problems::AdaptingProblem, split_method=:split_by_node_heuristic,
     @showprogress 1 "Verifying last layer change..."  for (i, nnet) in enumerate(problems.networks)
         
         # println("====")
-        diff = net_diff(nnet, problems.networks[last_net_id]);
-        # println("iter:", i, " net diff: ", diff)
-        if i > 1 && diff <= interval_range
+        diffs = net_diffs(nnet, problems.networks[last_net_id]);
+        in_INN = all([l1[1] <= l2[1] && l1[2] <= l2[2] for (l1, l2) in zip(diffs, interval_range)])
+        if i > 1 && in_INN
             append!(cnt_rec, cnts)
             append!(cov_rec, coverage)
             append!(tim_rec, 0)
