@@ -33,10 +33,10 @@ function _forward_network_collect(solver,
                                   input,
                                   collect_f=last)
     zs = (input, input)
-    elem = collect_f(zs)
+    # elem = collect_f(zs)
     collected = [(zs = forward_layer(solver, l, zs[2]); collect_f(zs))
                  for l in nnet.layers]
-    return [elem; collected]
+    return collected
 end
 
 # Get bounds from the reachable set propagated by a solver

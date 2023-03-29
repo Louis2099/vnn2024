@@ -55,6 +55,55 @@ function solve(solver::Ai2, problem::Problem)
     return check_inclusion(reach, problem.output)
 end
 
+function solve(solver::Ai2, problem::Problem; max_iter=100, sampling_size=1)
+    sampling_size = max(sampling_size, 1)
+    nnet, output = problem.network, problem.output
+    reach_list = []
+    domain = problem.input
+    for i in 1:max_iter
+        if i > 1
+            domain = select!(reach_list, :DFS)
+        end
+
+        reach = forward_network(solver, nnet, domain)
+        # println(reach)
+        # println(length(reach))
+        result = check_inclusion(reach, problem.output)
+
+        if result.status === :violated
+            counter_examples = sample_counter_examples(domain, output, nnet, sampling_size)
+            return CounterExamplesResult(:violated, counter_examples), i
+        elseif result.status === :unknown
+            subdomains = split_by_dimension(domain)
+            for domain in subdomains
+                push!(reach_list, domain)
+            end
+        end
+        isempty(reach_list) && return CounterExamplesResult(:holds), i
+    end
+    
+    return CounterExamplesResult(:unknown), max_iter
+end
+
+function split_by_dimension(domain)
+    
+    B = box_approximation(domain)
+    dim_sizes = [(high(B, i) - low(B, i)) for i in 1:dim(B)]
+    (max_len, max_dim) = findmax(dim_sizes)
+    
+    a = zeros(length(dim_sizes))
+    a[max_dim] = 1.0
+    b = (high(B, max_dim) + low(B,max_dim)) / 2.0
+    
+    # custom intersection function that doesn't do constraint pruning
+    ∩ = (set, lc) -> HPolytope([constraints_list(set); lc])
+    
+    subsets = Union{Nothing, HPolytope}[domain] # reach is the list of reachable set of each layer of the network.
+    subsets = subsets .∩ [HalfSpace(a, b), HalfSpace(-a, -b)]
+    
+    return subsets
+end
+
 # Ai2h and Ai2z use affine_map
 # Box uses approximate_affine_map for the linear region if it is propagating a zonotope
 forward_linear(solver::Ai2h, L::Layer{ReLU}, input::AbstractPolytope) = affine_map(L, input)

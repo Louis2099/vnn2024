@@ -35,7 +35,7 @@ Sound but not complete.
 end
 
 
-function solve(solver::Neurify, problem::Problem)
+function solve(solver::Neurify, problem::Problem; sampling_size=1)
     isbounded(problem.input) || throw(UnboundedInputError("Neurify can only handle bounded input sets."))
 
     # Because of over-approximation, a split may not bisect the input set.
@@ -44,6 +44,7 @@ function solve(solver::Neurify, problem::Problem)
     # To prevent this, we split each node only once if the gradient of this node hasn't changed.
     # Each element in splits is a tuple (layer_index, node_index, node_gradient).
 
+    sampling_size = max(sampling_size, 1)
     nnet, output = problem.network, problem.output
     reach_list = []
     domain = init_symbolic_grad(problem.input)
@@ -54,29 +55,42 @@ function solve(solver::Neurify, problem::Problem)
         end
 
         reach = forward_network(solver, nnet, domain, collect=true)
-        # The first entry is the input set
-        popfirst!(reach)
-        result, max_violation_con = check_inclusion(solver, nnet, last(reach).sym, output)
+        # println(reach)
+        # println(length(reach))
+        result, max_violation_con = check_inclusion(solver, nnet, last(reach).sym, output, sampling_size=sampling_size)
 
         if result.status === :violated
-            return result
+            return result, i
         elseif result.status === :unknown
             subdomains = constraint_refinement(nnet, reach, max_violation_con, splits)
             for domain in subdomains
                 push!(reach_list, (init_symbolic_grad(domain), copy(splits)))
             end
-
         end
-        isempty(reach_list) && return CounterExampleResult(:holds)
+        isempty(reach_list) && return CounterExamplesResult(:holds), i
     end
-    return CounterExampleResult(:unknown)
+    return CounterExamplesResult(:unknown), solver.max_iter
+end
+
+function sample_counter_examples(input, output, nnet, sampling_size)
+    sampler = LazySets.RejectionSampler(input)
+    input_approx = LazySets.box_approximation(input);
+    # println("========== sampling ==========")
+    # println(input)
+    # println(input_approx)
+    # println(sampling_size)
+    # println("========== done ==========")
+    samples = LazySets.sample(input_approx, sampling_size; sampler=sampler)
+    counter_examp1es = [sample for sample in samples if compute_output(nnet, sample) ∉ output]
+    return counter_examp1es
 end
 
 function check_inclusion(solver::Neurify, nnet::Network,
-                         reach::SymbolicInterval, output)
+                         reach::SymbolicInterval, output; sampling_size=1)
     # The output constraint is in the form A*x < b
     # We try to maximize output constraint to find a violated case, or to verify the inclusion.
     # Suppose the output is [1, 0, -1] * x < 2, Then we are maximizing reach.Up[1] * 1 + reach.Low[3] * (-1)
+
 
     input_domain = domain(reach)
 
@@ -97,7 +111,9 @@ function check_inclusion(solver::Neurify, nnet::Network,
 
         if termination_status(model) == OPTIMAL
             if compute_output(nnet, value(x)) ∉ output
-                return CounterExampleResult(:violated, value(x)), nothing
+                counter_examples = sample_counter_examples(input_domain, output, nnet, sampling_size-1)
+                push!(counter_examples, value(x))
+                return CounterExamplesResult(:violated, counter_examples), nothing
             end
 
             viol = objective_value(model)
@@ -105,6 +121,7 @@ function check_inclusion(solver::Neurify, nnet::Network,
                 max_violation = viol
                 max_violation_con = a
             end
+
         else
             # TODO can we be more descriptive?
             error("No solution, please check the problem definition.")
@@ -113,9 +130,9 @@ function check_inclusion(solver::Neurify, nnet::Network,
     end
 
     if max_violation > 0.0
-        return CounterExampleResult(:unknown), max_violation_con
+        return CounterExamplesResult(:unknown), max_violation_con
     else
-        return CounterExampleResult(:holds), nothing
+        return CounterExamplesResult(:holds), nothing
     end
 end
 
@@ -125,6 +142,13 @@ function constraint_refinement(nnet::Network,
                                splits)
 
     i, j, influence = get_max_nodewise_influence(nnet, reach, max_violation_con, splits)
+    # println("refine")
+    # println(i," ",j)
+    # println(size(reach[1].sym.Low))
+    # println(size(reach[2].sym.Low))
+    # println(size(reach[3].sym.Low))
+    # println(size(reach[i].sym.Low))
+    # println(size(reach[i].sym.Low[j]))
     # We can generate three more constraints
     # Symbolic representation of node i j is Low[i][j,:] and Up[i][j,:]
     aL, bL = reach[i].sym.Low[j, 1:end-1], reach[i].sym.Low[j, end]
