@@ -68,7 +68,7 @@ function find_lipschitz(network)
     
     @objective(model, Min, L_sq)
     
-    @SDconstraint(model, A_on_B' * Q * A_on_B - M ⪯ 0)
+    @constraint(model, -A_on_B' * Q * A_on_B + M >= 0, PSDCone())
     
     optimize!(model)
     
