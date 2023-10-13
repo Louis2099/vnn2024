@@ -523,16 +523,16 @@ version = "0.4.5"
 uuid = "a63ad114-7e13-5084-954f-fe012c677804"
 
 [[Mosek]]
-deps = ["Libdl", "Pkg", "Printf", "SparseArrays", "WinReg"]
-git-tree-sha1 = "883be630ab4a25991037c2a2079d7170a5a8908e"
+deps = ["Libdl", "Pkg", "Printf", "SparseArrays"]
+git-tree-sha1 = "ea17cd2ac2f5dae43e2f9a29948ded26c3a57b7b"
 uuid = "6405355b-0ac2-5fba-af84-adbd65488c0e"
-version = "1.1.3"
+version = "10.0.0"
 
 [[MosekTools]]
 deps = ["MathOptInterface", "Mosek", "Printf"]
-git-tree-sha1 = "56f7c254a9d3769bda929e05f1db2d19d8aa3375"
+git-tree-sha1 = "02da5770794ecafcd92e6077c667c0f6af8152f0"
 uuid = "1ec41992-ff65-5c91-ac43-2df89e9693a4"
-version = "0.9.4"
+version = "0.15.1"
 
 [[MutableArithmetics]]
 deps = ["LinearAlgebra", "SparseArrays", "Test"]
@@ -696,10 +696,10 @@ uuid = "5eaf0fd0-dfba-4ccb-bf02-d820a40db705"
 version = "0.2.1"
 
 [[SCS]]
-deps = ["BinaryProvider", "Libdl", "LinearAlgebra", "MathOptInterface", "MathProgBase", "SparseArrays"]
-git-tree-sha1 = "936d43feaceae3290472ddf800b496be094d727b"
+deps = ["Requires", "SCS_GPU_jll", "SCS_MKL_jll", "MathOptInterface", "SCS_jll", "SparseArrays"]
+git-tree-sha1 = "1a5cb7d9a080c45677b8bb55cdec1e28963e9ff1"
 uuid = "c946c3f1-0d1f-5ce8-9dea-7daa1f7e2d13"
-version = "0.6.6"
+version = "1.3.1"
 
 [[SHA]]
 uuid = "ea8e919c-243c-51af-8825-aaa63cd721ce"
