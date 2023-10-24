@@ -2,7 +2,7 @@ module NeuralVerification
 
 using JuMP
 
-using GLPK, SCS, CPLEX # SCS only needed for Certify
+using GLPK, SCS, CPLEX, Gurobi # SCS only needed for Certify
 using PicoSAT # needed for Planet
 using LazySets, LazySets.Approximations
 using Polyhedra, CDDLib
@@ -91,7 +91,7 @@ include("optimization/certify.jl")
 include("optimization/iLP.jl")
 include("optimization/mipVerify.jl")
 include("optimization/nnDyn.jl")
-export NSVerify, ConvDual, Duality, Certify, ILP, MIPVerify, NNDynTrack
+export NSVerify, ConvDual, Duality, Certify, ILP, MIPVerify, NNDynTrack, NNDynTrackBPO
 
 include("reachability/utils/reachability.jl")
 include("reachability/exactReach.jl")

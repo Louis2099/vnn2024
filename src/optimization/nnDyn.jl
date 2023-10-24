@@ -1,6 +1,9 @@
 @with_kw struct NNDynTrack <: Solver
     optimizer = CPLEX.Optimizer
 end
+@with_kw struct NNDynTrackBPO <: Solver
+    optimizer = Gurobi.Optimizer
+end
 
 function solve(solver::NNDynTrack, problem::TrackingProblem, start_values=nothing; u_ref = nothing, xu_init = nothing)
     model = Model(solver)
