@@ -7,6 +7,7 @@ struct TriangularRelaxedLP   <: AbstractLinearProgram end
 struct BoundedMixedIntegerLP <: AbstractLinearProgram end
 struct SlackLP               <: AbstractLinearProgram end
 struct MixedIntegerLP        <: AbstractLinearProgram end
+struct BernsteinPolynomial2LP   <: AbstractLinearProgram end
 
 Base.Broadcast.broadcastable(LP::AbstractLinearProgram) = Ref(LP)
 
@@ -31,12 +32,13 @@ _init_unique(m::Model, prob::Problem, encoding::AbstractLinearProgram) = nothing
 _init_unique(m::Model, prob::Problem, encoding::SlackLP) = init_vars(m, prob.network, :slack)
 _init_unique(m::Model, prob::Problem, encoding::MixedIntegerLP) = init_vars(m, prob.network, :δ, binary=true)
 _init_unique(m::Model, prob::Problem, encoding::TriangularRelaxedLP) = _insert_bounds(m, prob, encoding)
+_init_unique(m::Model, prob::Problem, encoding::BernsteinPolynomial2LP) = _insert_bounds(m, prob, encoding)
 function _init_unique(m::Model, prob::Problem, encoding::BoundedMixedIntegerLP)
     init_vars(m, prob.network, :δ, binary=true)
     _insert_bounds(m, prob, encoding)
 end
 
-function _insert_bounds(m::Model, prob::Problem, encoding::Union{TriangularRelaxedLP, BoundedMixedIntegerLP})
+function _insert_bounds(m::Model, prob::Problem, encoding::Union{TriangularRelaxedLP, BoundedMixedIntegerLP, BernsteinPolynomial2LP})
     if !haskey(object_dictionary(m), :bounds)
         before_act = get!(object_dictionary(m), :before_act, true)
         m[:bounds] = get_bounds(prob, !before_act)
@@ -49,6 +51,7 @@ model_params(LP::StandardLP,            m::Model, i::Integer) = (_ẑᵢ₊₁(m
 model_params(LP::LinearRelaxedLP,       m::Model, i::Integer) = (_ẑᵢ₊₁(m, i), m[:z][i+1], m[:δ][i])
 model_params(LP::MixedIntegerLP,        m::Model, i::Integer) = (_ẑᵢ₊₁(m, i), m[:z][i+1], m[:δ][i], -m[:M], m[:M])
 model_params(LP::SlackLP,               m::Model, i::Integer) = (_ẑᵢ₊₁(m, i), m[:z][i+1], m[:δ][i], m[:slack][i])
+model_params(LP::BernsteinPolynomial2LP,   m::Model, i::Integer) = (_ẑᵢ₊₁(m, i), m[:z][i+1], _ẑᵢ₊₁_bound(m, i)...)
 
 # helper function to get the bounds relevant for the i-th layer constraint.
 # If before_act=true, then the model is storing the pre-activation
@@ -159,6 +162,26 @@ function encode_relu(::TriangularRelaxedLP, model, ẑᵢⱼ, zᵢⱼ, l̂ᵢⱼ
                                 zᵢⱼ >= 0.0
                                 zᵢⱼ >= ẑᵢⱼ
                                 zᵢⱼ <= (ẑᵢⱼ - l̂ᵢⱼ) * ûᵢⱼ / (ûᵢⱼ - l̂ᵢⱼ)
+                            end)
+    end
+end
+
+function encode_relu(::BernsteinPolynomial2LP, model, ẑᵢⱼ, zᵢⱼ, l̂ᵢⱼ, ûᵢⱼ)
+    if l̂ᵢⱼ > 0.0
+        @constraint(model, zᵢⱼ == ẑᵢⱼ)
+    elseif ûᵢⱼ < 0.0
+        @constraint(model, zᵢⱼ == 0.0)
+    elseif (ûᵢⱼ + l̂ᵢⱼ) / 2 < 0.0
+        @constraints(model, begin
+                                zᵢⱼ >= 0.0
+                                zᵢⱼ >= ẑᵢⱼ
+                                zᵢⱼ <= (ẑᵢⱼ - l̂ᵢⱼ)^2 * ûᵢⱼ / ((ûᵢⱼ - l̂ᵢⱼ)^2)
+                            end)
+    else
+        @constraints(model, begin
+                                zᵢⱼ >= 0.0
+                                zᵢⱼ >= ẑᵢⱼ
+                                zᵢⱼ <= (ẑᵢⱼ - l̂ᵢⱼ)^2 * ûᵢⱼ / ((ûᵢⱼ - l̂ᵢⱼ)^2) + (ẑᵢⱼ - l̂ᵢⱼ) * (ûᵢⱼ - ẑᵢⱼ) * (ûᵢⱼ + l̂ᵢⱼ) / ((ûᵢⱼ - l̂ᵢⱼ)^2) 
                             end)
     end
 end
