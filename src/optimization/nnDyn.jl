@@ -1,8 +1,14 @@
 @with_kw struct NNDynTrack <: Solver
     optimizer = CPLEX.Optimizer
 end
-@with_kw struct NNDynTrackBPO <: Solver
+@with_kw struct NNDynTrackGurobi <: Solver
     optimizer = Gurobi.Optimizer
+end
+@with_kw struct NNDynTrackNLopt <: Solver
+    optimizer = NLopt.Optimizer
+end
+@with_kw struct NNDynTrackIpopt <: Solver
+    optimizer = Ipopt.Optimizer
 end
 
 function solve(solver::NNDynTrack, problem::TrackingProblem, start_values=nothing; u_ref = nothing, xu_init = nothing)
