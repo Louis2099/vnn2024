@@ -91,7 +91,7 @@ include("optimization/certify.jl")
 include("optimization/iLP.jl")
 include("optimization/mipVerify.jl")
 include("optimization/nnDyn.jl")
-export NSVerify, ConvDual, Duality, Certify, ILP, MIPVerify, NNDynTrack, NNDynTrackGurobi, NNDynTrackNLopt, NNDynTrackIpopt
+export NSVerify, ConvDual, Duality, Certify, ILP, MIPVerify, NNDynTrack, NNDynTrackGurobi, NNDynTrackNLopt, NNDynTrackIpopt, NNDynTrackGLPK
 
 include("reachability/utils/reachability.jl")
 include("reachability/exactReach.jl")

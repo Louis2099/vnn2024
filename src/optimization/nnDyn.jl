@@ -10,6 +10,9 @@ end
 @with_kw struct NNDynTrackIpopt <: Solver
     optimizer = Ipopt.Optimizer
 end
+@with_kw struct NNDynTrackGLPK<: Solver
+    optimizer = GLPK.Optimizer
+end
 
 function solve(solver::NNDynTrack, problem::TrackingProblem, start_values=nothing; u_ref = nothing, xu_init = nothing)
     model = Model(solver)
